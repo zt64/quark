@@ -1,0 +1,42 @@
+#pragma once
+#include <cstdint>
+#include <cstddef>
+
+namespace vfs {
+    struct file {
+        char name[255];
+        uint32_t size;
+    };
+
+    struct dir {
+        char name[255];
+        uint32_t file_count;
+        file* files;
+    };
+
+    enum class file_type : uint8_t {
+        Regular,
+        Directory,
+        Symlink,
+        BlockDevice,
+        CharacterDevice,
+        Fifo,
+        Socket,
+        Unknown
+    };
+
+    struct dir_entry {
+        char name[255];
+        file_type type;
+        uint64_t size;
+        uint64_t inode;
+    };
+
+    void init();
+
+    void mount(const char* path);
+    uint32_t open(const char* path, uint32_t flags);
+    size_t read(const char* path, uint8_t* buffer, uint32_t size);
+    size_t readdir(const char* path, dir_entry* entries, uint32_t max_entries);
+    void close (uint32_t handle);
+}

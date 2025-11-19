@@ -1,72 +1,142 @@
 cmake_minimum_required(VERSION 3.20)
-project(tetros LANGUAGES C CXX ASM_NASM)
+project(quark LANGUAGES C CXX ASM_NASM)
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_C_IMPLICIT_LINK_LIBRARIES "")
+set(CMAKE_CXX_IMPLICIT_LINK_LIBRARIES "")
+
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_ASM_NASM_COMPILER nasm)
 set(CMAKE_ASM_NASM_OBJECT_FORMAT elf64)
-set(CMAKE_ASM_NASM_COMPILE_OBJECT
-        "<CMAKE_ASM_NASM_COMPILER> <INCLUDES> -f ${CMAKE_ASM_NASM_OBJECT_FORMAT} -o <OBJECT> <SOURCE>")
+set(CMAKE_ASM_NASM_COMPILE_OBJECT "<CMAKE_ASM_NASM_COMPILER> <INCLUDES> -f ${CMAKE_ASM_NASM_OBJECT_FORMAT} -o <OBJECT> <SOURCE>")
 
-file(GLOB_RECURSE SOURCES_ASM src/*.asm)
-file(GLOB_RECURSE SOURCES_CXX src/*.cpp src/*.c)
-set_source_files_properties(${SOURCES_ASM} PROPERTIES LANGUAGE ASM_NASM)
+set(KERNEL_TARGET quark)
 
-set(KERNEL_TARGET tetros)
-add_executable(${KERNEL_TARGET} ${SOURCES_ASM} ${SOURCES_CXX})
-
-target_compile_options(${KERNEL_TARGET} PRIVATE
-        -ffreestanding -fno-exceptions -fno-rtti
-        -Wall -Wextra -mno-mmx -mno-avx -mno-avx512f -mno-sse2
+add_library(quark_freestanding_options INTERFACE)
+target_compile_options(quark_freestanding_options INTERFACE
+        -ffreestanding
+        -fno-builtin
+        -fno-stack-protector
+        -mno-red-zone
+        -mno-mmx
+        -mno-avx
+        -mno-avx512f
+        -mno-sse
+        -mno-sse2
+        -fno-pic
+        -fno-pie
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
 )
 
-target_include_directories(${KERNEL_TARGET} PRIVATE include)
-target_link_libraries(${KERNEL_TARGET} PRIVATE gcc)
-target_link_options(${KERNEL_TARGET} PRIVATE
-        -T ${CMAKE_SOURCE_DIR}/linker.ld -nostdlib -static
+add_library(quark_kernel_options INTERFACE)
+target_link_libraries(quark_kernel_options INTERFACE quark_freestanding_options)
+target_compile_options(quark_kernel_options INTERFACE
+        -mcmodel=kernel
+        -Wall
+        -Wextra
+        $<$<CONFIG:Debug>:-g>
+        $<$<CONFIG:Debug>:-O0>
+        $<$<CONFIG:Release>:-O3>
+)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+
+add_library(quark_userspace_options INTERFACE)
+target_link_libraries(quark_userspace_options INTERFACE quark_freestanding_options)
+target_compile_options(quark_userspace_options INTERFACE
+        -mcmodel=small
+        $<$<CONFIG:Debug>:-g>
+        $<$<CONFIG:Debug>:-O0>
+        $<$<CONFIG:Release>:-O3>
 )
 
-find_program(GRUB_MKRESCUE NAMES grub-mkrescue grub2-mkrescue)
-if(NOT GRUB_MKRESCUE)
-    message(WARNING "grub-mkrescue not found")
-    return()
-endif()
+set(TOOLCHAIN_PREFIX ${CMAKE_BINARY_DIR}/toolchain)
+set(QUARK_SYSROOT ${CMAKE_BINARY_DIR}/sysroot CACHE PATH "Quark sysroot root")
+set(CMAKE_INSTALL_PREFIX ${QUARK_SYSROOT} CACHE PATH "" FORCE)
+
+add_subdirectory(toolchain)
+add_subdirectory(libc)
+add_subdirectory(kernel)
+add_subdirectory(user/init)
+add_subdirectory(user/snell)
+add_dependencies(${KERNEL_TARGET} init snell)
+
+find_program(XORRISO NAMES xorriso)
+if (NOT XORRISO)
+    message(FATAL_ERROR "xorriso not found")
+endif ()
+
+find_program(QEMU_SYSTEM_X86_64 NAMES qemu-system-x86_64)
+if (NOT QEMU_SYSTEM_X86_64)
+    message(FATAL_ERROR "qemu-system-x86_64 not found")
+endif ()
 
 set(ISO_DIR ${CMAKE_BINARY_DIR}/iso)
-set(ISO_OUTPUT ${CMAKE_BINARY_DIR}/tetros.iso)
-set(GRUB_CFG ${ISO_DIR}/boot/grub/grub.cfg)
+set(ISO_OUTPUT ${CMAKE_BINARY_DIR}/quark.iso)
+set(LIMINE_SRC_DIR ${CMAKE_SOURCE_DIR}/external/limine)
+set(LIMINE_DIR ${ISO_DIR}/boot/limine)
+set(QEMU_COMMON_ARGS
+        -cdrom ${ISO_OUTPUT}
+        -net none
+        -serial mon:stdio
+        -m 4G
+        -audiodev pa,id=speaker
+        -machine pcspk-audiodev=speaker
+        -no-reboot
+        -no-shutdown
+        -smbios type=0,vendor=hog_vendor,version=1.2.3
+        -smbios type=3,version=te
+)
 
-file(WRITE ${CMAKE_BINARY_DIR}/grub.cfg.in
-        "insmod all_video
-set timeout=1
-set default=0
+find_program(DD_TOOL NAMES dd REQUIRED)
+find_program(MFORMAT_TOOL NAMES mformat REQUIRED)
+find_program(MCOPY_TOOL NAMES mcopy REQUIRED)
+find_program(MMD_TOOL NAMES mmd REQUIRED)
 
-menuentry \"kernel\" {
-  multiboot2 /boot/tetros.bin
-  boot
-}
-")
+set(QUARK_IMG ${CMAKE_CURRENT_BINARY_DIR}/quark.img)
 
-add_custom_command(TARGET ${KERNEL_TARGET} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${ISO_DIR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${ISO_DIR}/boot/grub
-        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${KERNEL_TARGET}> ${ISO_DIR}/boot/tetros.bin
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/grub.cfg.in ${GRUB_CFG}
-        COMMAND ${GRUB_MKRESCUE} -o ${ISO_OUTPUT} ${ISO_DIR}
-        COMMENT "Creating bootable ISO"
+add_custom_command(
+        OUTPUT ${QUARK_IMG}
+        COMMAND ${DD_TOOL} if=/dev/zero of=${QUARK_IMG} bs=1M count=64 status=none
+        COMMAND ${MFORMAT_TOOL} -i ${QUARK_IMG} -F ::
+        COMMENT "Creating FAT32 disk image"
+        VERBATIM
+)
+add_custom_target(quark_img DEPENDS ${QUARK_IMG})
+
+add_custom_target(quark_sysroot_install
+        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG>
+        DEPENDS ${KERNEL_TARGET} init snell quark_libc
+        COMMENT "Installing kernel + userspace into sysroot"
         VERBATIM
 )
 
-find_program(QEMU_SYSTEM qemu-system-x86_64)
-if(QEMU_SYSTEM)
-    add_custom_target(run
-            COMMAND ${QEMU_SYSTEM} -cdrom ${ISO_OUTPUT} -serial stdio
-            -audiodev pa,id=speaker -machine pcspk-audiodev=speaker -no-reboot -no-shutdown
-            DEPENDS ${KERNEL_TARGET}
-            COMMENT "Running in QEMU"
-            USES_TERMINAL
-    )
-else()
-    message(WARNING "${QEMU_SYSTEM} not found")
-endif()
+add_custom_target(quark_iso
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${ISO_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${LIMINE_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_SYSROOT}/boot/quark ${ISO_DIR}/boot/quark
+        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_SYSROOT}/boot/init ${ISO_DIR}/boot/init.elf
+        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_SYSROOT}/boot/snell ${ISO_DIR}/boot/snell.elf
+        COMMAND ${MCOPY_TOOL} -i ${QUARK_IMG} -o -s ${QUARK_SYSROOT}/boot ::/
+
+        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_IMG} ${ISO_DIR}/quark.img
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/limine.conf ${LIMINE_SRC_DIR}/limine-bios.sys
+        ${LIMINE_SRC_DIR}/limine-bios-cd.bin ${LIMINE_SRC_DIR}/limine-uefi-cd.bin ${LIMINE_DIR}
+
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${ISO_DIR}/EFI/BOOT
+        COMMAND ${CMAKE_COMMAND} -E copy ${LIMINE_SRC_DIR}/BOOTX64.EFI ${ISO_DIR}/EFI/BOOT
+        COMMAND ${CMAKE_COMMAND} -E copy ${LIMINE_SRC_DIR}/BOOTIA32.EFI ${ISO_DIR}/EFI/BOOT
+
+        COMMAND ${XORRISO} -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin
+        -no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus
+        -apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin
+        -efi-boot-part --efi-boot-image --protective-msdos-label
+        ${ISO_DIR} -o ${ISO_OUTPUT}
+
+        COMMAND ${LIMINE_SRC_DIR}/limine bios-install ${ISO_OUTPUT}
+        COMMENT "Creating bootable ISO"
+        VERBATIM
+)
+add_dependencies(quark_iso quark_sysroot_install quark_img)

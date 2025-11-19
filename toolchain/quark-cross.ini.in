@@ -1,0 +1,15 @@
+[binaries]
+c = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-elf-gcc'
+cpp = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-elf-g++'
+
+[built-in options]
+c_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone']
+cpp_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone']
+c_link_args = ['--sysroot=@QUARK_SYSROOT@']
+cpp_link_args = ['--sysroot=@QUARK_SYSROOT@']
+
+[host_machine]
+system = 'quark'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'

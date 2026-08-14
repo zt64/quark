@@ -1,7 +1,3 @@
 [submodule "external/uacpi"]
 	path = external/uacpi
 	url = git@github.com:uACPI/uACPI.git
-[submodule "libc/subprojects/mlibc"]
-	path = libc/subprojects/mlibc
-	url = git@github.com:managarm/mlibc.git
-	branch = v7.x

@@ -16,15 +16,12 @@ set(KERNEL_TARGET quark)
 
 add_library(quark_freestanding_options INTERFACE)
 target_compile_options(quark_freestanding_options INTERFACE
-        -ffreestanding
         -fno-builtin
         -fno-stack-protector
         -mno-red-zone
         -mno-mmx
         -mno-avx
         -mno-avx512f
-        -mno-sse
-        -mno-sse2
         -fno-pic
         -fno-pie
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
@@ -51,17 +48,39 @@ target_compile_options(quark_userspace_options INTERFACE
         $<$<CONFIG:Debug>:-O0>
         $<$<CONFIG:Release>:-O3>
 )
+target_link_options(quark_userspace_options INTERFACE
+        -nostdlib
+        -static
+        -no-pie
+        -Wl,-T,${CMAKE_SOURCE_DIR}/user/linker.ld
+)
+# Userspace executables build with -nostdlib and their own entry point, so
+# GCC's crtbegin.o/crtend.o (which would normally define __dso_handle) are
+# never linked in. Provide it centrally here so every target that links
+# quark_userspace_options gets it, instead of duplicating it per program.
+# TODO: Figure out if this is actually needed
+target_sources(quark_userspace_options INTERFACE ${CMAKE_SOURCE_DIR}/user/crt/dso_handle.cpp)
 
 set(TOOLCHAIN_PREFIX ${CMAKE_BINARY_DIR}/toolchain)
 set(QUARK_SYSROOT ${CMAKE_BINARY_DIR}/sysroot CACHE PATH "Quark sysroot root")
 set(CMAKE_INSTALL_PREFIX ${QUARK_SYSROOT} CACHE PATH "" FORCE)
 
-add_subdirectory(toolchain)
-add_subdirectory(libc)
+set(GCC_VERSION 15.3.0)
+
+include(ExternalProject)
+
+include(toolchain/headers.cmake)   # defines mlibc_headers, target now exists in this scope
+add_subdirectory(libc)             # mlibc_build can DEPENDS gcc_build
+add_subdirectory(toolchain)        # gcc_build can DEPENDS mlibc_headers, target already known
+
+# mlibc_build and gcc_bootstrap each need to reference the other's target name
+# (mlibc_build needs the bootstrap compiler binary; gcc_final needs mlibc's
+# libc.a)
+add_dependencies(mlibc_build gcc_bootstrap)
+
 add_subdirectory(kernel)
 add_subdirectory(user/init)
 add_subdirectory(user/snell)
-add_dependencies(${KERNEL_TARGET} init snell)
 
 find_program(XORRISO NAMES xorriso)
 if (NOT XORRISO)

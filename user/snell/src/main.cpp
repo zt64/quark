@@ -1,7 +1,10 @@
 #include <cstdint>
-#include <cstring.hpp>
+#include <cstring>
 #include <font8x8.hpp>
-#include "kernel.hpp"
+
+#include "unistd.h"
+#include "../../../libc/include/cstring.hpp"
+#include "sys/mman.h"
 
 constexpr uint32_t width = 1280;
 constexpr uint32_t height = 720;
@@ -96,7 +99,7 @@ int main() {
             }
         }
 
-        memcpy_fast(fbp, screen_buffer, screen_size);
+        // memcpy_fast(fbp, screen_buffer, screen_size);
     }
 
     return 0;

@@ -1,5 +1,4 @@
 #include "kernel/log.hpp"
-#include <cstdarg>
 #include "driver/fb.hpp"
 #include "driver/serial.hpp"
 #include "lib/format.hpp"

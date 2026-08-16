@@ -1,8 +1,8 @@
 diff --git a/bfd/config.bfd b/bfd/config.bfd
-index 4e5a838f..408f8174 100644
+index 02a1a68525e..9b45795c4ea 100644
 --- a/bfd/config.bfd
 +++ b/bfd/config.bfd
-@@ -237,6 +237,11 @@ esac
+@@ -243,6 +243,11 @@ esac
  case "${targ}" in
  # START OF targmatch.h
  #ifdef BFD64
@@ -15,10 +15,10 @@ index 4e5a838f..408f8174 100644
      targ_defvec=aarch64_mach_o_vec
      targ_selvecs="arm_mach_o_vec mach_o_le_vec mach_o_be_vec mach_o_fat_vec"
 diff --git a/config.sub b/config.sub
-index 4aaae46f..7f235576 100755
+index 3d35cde174d..3681b2ff16b 100755
 --- a/config.sub
 +++ b/config.sub
-@@ -1964,7 +1964,8 @@ case $os in
+@@ -1969,7 +1969,8 @@ case $os in
  		;;
  	# Now accept the basic system types.
  	# Each alternative MUST end in a * to match a version number.
@@ -29,29 +29,36 @@ index 4aaae46f..7f235576 100755
  	| amdhsa* \
  	| amigados* \
 diff --git a/gas/configure.tgt b/gas/configure.tgt
-index 7c81bffa..9f1eddbc 100644
+index 7a5645fd9ae..e96fe555575 100644
 --- a/gas/configure.tgt
 +++ b/gas/configure.tgt
 @@ -126,6 +126,7 @@ esac
  generic_target=${cpu_type}-$vendor-$os
  # Note: This table is alpha-sorted, please try to keep it that way.
  case ${generic_target} in
-+  i386-quark*)    fmt=elf ;;
++  i386-*-quark*)    fmt=elf ;;
    aarch64*-*-elf*)			fmt=elf;;
    aarch64*-*-fuchsia*)			fmt=elf;;
    aarch64*-*-haiku*)			fmt=elf em=haiku ;;
 diff --git a/ld/configure.tgt b/ld/configure.tgt
-index ea01ccf9..2ed9614d 100644
+index 60b62e69c08..fbf58c03814 100644
 --- a/ld/configure.tgt
 +++ b/ld/configure.tgt
 @@ -82,6 +82,10 @@ fi
  # Please try to keep this table more or less in alphabetic order - it
  # makes it much easier to lookup a specific archictecture.
  case "${targ}" in
-+x86_64-quark*)
++x86_64-*-quark*)
 +			targ_emul=elf_x86_64_quark
 +			targ_extra_emuls="elf_x86_64"
 +			;;
  aarch64_be-*-elf)	targ_emul=aarch64elfb
  			targ_extra_emuls="aarch64elf aarch64elf32 aarch64elf32b armelfb armelf"
  			;;
+diff --git a/ld/emulparams/elf_x86_64_quark.sh b/ld/emulparams/elf_x86_64_quark.sh
+new file mode 100644
+index 00000000000..1138d5551cb
+--- /dev/null
++++ b/ld/emulparams/elf_x86_64_quark.sh
+@@ -0,0 +1 @@
++source_sh ${srcdir}/emulparams/elf_x86_64.sh

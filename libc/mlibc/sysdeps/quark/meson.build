@@ -82,8 +82,8 @@ endif
 if not headers_only
 	crt = custom_target('crt1',
 		build_by_default: true,
-		command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
-		input: 'crt1.S',
+		command: ['nasm', '-f', 'elf64', '-o', '@OUTPUT@', '@INPUT@'],
+		input: 'crt1.asm',
 		output: 'crt1.o',
 		install: true,
 		install_dir: get_option('libdir')

@@ -154,7 +154,7 @@ namespace elf {
 
 #define ELF_RELOC_ERR (-1)
 
-    ElfImage* load_file(uintptr_t cr3, const uintptr_t addr) {
+    ElfImage* load_file(const uintptr_t cr3, const uintptr_t addr) {
         const auto* hdr = reinterpret_cast<const ElfHeader*>(addr);
         if (!elf_check_supported(hdr)) {
             logger.error("ELF File cannot be loaded.\n");

@@ -15,7 +15,6 @@ target_link_libraries(quark_kernel_libc PRIVATE quark_kernel_options)
 
 # --- Hosted userspace libc (mlibc, built via Meson into the shared sysroot) ---
 include(ExternalProject)
-
 find_program(MESON_EXE NAMES meson REQUIRED)
 find_program(NINJA_EXE NAMES ninja REQUIRED)
 
@@ -25,22 +24,13 @@ configure_file(
         @ONLY
 )
 
-ExternalProject_Add(mlibc_headers
-        SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mlibc
-        CONFIGURE_COMMAND ${MESON_EXE} setup
-        --cross-file ${CMAKE_BINARY_DIR}/quark-cross.ini
-        --prefix=/usr -Dheaders_only=true
-        <BINARY_DIR> <SOURCE_DIR>
-        BUILD_COMMAND ""
-        INSTALL_COMMAND ${CMAKE_COMMAND} -E env DESTDIR=${QUARK_SYSROOT} ${NINJA_EXE} -C <BINARY_DIR> install
-)
-
 ExternalProject_Add(mlibc_build
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/mlibc
         DEPENDS mlibc_headers
         CONFIGURE_COMMAND ${MESON_EXE} setup
         --cross-file ${CMAKE_BINARY_DIR}/quark-cross.ini
         --prefix=/usr -Ddefault_library=static -Dno_headers=true
+        -Duse_freestnd_hdrs=enabled
         <BINARY_DIR> <SOURCE_DIR>
         BUILD_COMMAND ${NINJA_EXE} -C <BINARY_DIR>
         INSTALL_COMMAND ${CMAKE_COMMAND} -E env DESTDIR=${QUARK_SYSROOT} ${NINJA_EXE} -C <BINARY_DIR> install
@@ -48,10 +38,13 @@ ExternalProject_Add(mlibc_build
 )
 
 file(MAKE_DIRECTORY ${QUARK_SYSROOT}/usr/include)
-add_dependencies(mlibc_headers gcc_build)
+
 add_library(quark_libc STATIC IMPORTED GLOBAL)
 set_target_properties(quark_libc PROPERTIES
         IMPORTED_LOCATION ${QUARK_SYSROOT}/usr/lib/libc.a
-        INTERFACE_INCLUDE_DIRECTORIES ${QUARK_SYSROOT}/usr/include
+        # Include both the mlibc-installed sysroot headers and this repo's own
+        # userspace-facing headers (e.g. font8x8.hpp, print.hpp) so any target
+        # linking against quark_libc can use them with angle-bracket includes.
+        INTERFACE_INCLUDE_DIRECTORIES "${QUARK_SYSROOT}/usr/include;${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 add_dependencies(quark_libc mlibc_build)

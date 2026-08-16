@@ -1,16 +1,5 @@
-#include <format.hpp>
-#include <string.hpp>
-#include <kernel.hpp>
-
-void printf(const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-
-    const char* str = vformat(fmt, args);
-    write(1, str, strlen(str));
-
-    va_end(args);
-}
+#include "stdio.h"
+#include "unistd.h"
 
 int main() {
     const size_t curr_pid = getpid();

@@ -7,6 +7,7 @@
 #include "kernel/userspace.hpp"
 
 extern "C" [[noreturn]] void kmain() {
+    platform::init_fpu();
     boot::init_early();
     logger.info("Initializing kernel...");
     platform::init();

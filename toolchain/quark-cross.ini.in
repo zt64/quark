@@ -1,12 +1,25 @@
 [binaries]
-c = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-elf-gcc'
-cpp = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-elf-g++'
+c = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-gcc'
+cpp = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-g++'
+ar = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-ar'
+strip = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-strip'
+ld = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-ld'
 
 [built-in options]
-c_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone']
-cpp_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone']
-c_link_args = ['--sysroot=@QUARK_SYSROOT@']
-cpp_link_args = ['--sysroot=@QUARK_SYSROOT@']
+# The last -idirafter points at the cross-compiler's own bundled intrinsic /
+# ABI headers (e.g. immintrin.h), guaranteed to match exactly what this GCC
+# release supports. mlibc must not use the vendored freestnd-c-hdrs snapshot
+# for these: that snapshot is pinned to headers generated from a specific
+# upstream GCC version and is not guaranteed to match this toolchain's GCC
+# (verified: it references target attributes GCC 15.x removed).
+c_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone',
+           '-mno-avx', '-mno-avx2', '-mno-avx512f',
+           '-idirafter', '@QUARK_SYSROOT@/usr/include',
+           '-idirafter', '@TOOLCHAIN_PREFIX@/lib/gcc/x86_64-quark/@GCC_VERSION@/include']
+cpp_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone',
+           '-mno-avx', '-mno-avx2', '-mno-avx512f',
+           '-idirafter', '@QUARK_SYSROOT@/usr/include',
+           '-idirafter', '@TOOLCHAIN_PREFIX@/lib/gcc/x86_64-quark/@GCC_VERSION@/include']
 
 [host_machine]
 system = 'quark'

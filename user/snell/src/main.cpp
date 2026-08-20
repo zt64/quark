@@ -3,7 +3,6 @@
 #include <font8x8.hpp>
 
 #include "unistd.h"
-#include "../../../libc/include/cstring.hpp"
 #include "sys/mman.h"
 
 constexpr uint32_t width = 1280;

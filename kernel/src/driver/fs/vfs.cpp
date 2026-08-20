@@ -22,14 +22,10 @@ namespace vfs {
         const limine_file* img_module = res->modules[0];
 
         fat32::init(img_module->address);
+    }
 
-        dir_entry entries[10];
-        const size_t entries_read = readdir("/BOOT", entries, 10);
-
-        for (uint32_t i = 0; i < entries_read; i++) {
-            logger.info("Entry: %s, Type: %d, Size: %llu", entries[i].name, static_cast<uint8_t>(entries[i].type),
-                        entries[i].size);
-        }
+    size_t stat(const char* path, vfs::stat_t* buffer) {
+        return fat32::stat(path, buffer);
     }
 
     uint32_t open(const char* path, uint32_t flags) {

@@ -1,5 +1,4 @@
 #include "memory/vmm.hpp"
-#include <cstdint>
 #include <kernel/log.hpp>
 #include "lib/stdlib.hpp"
 #include "memory/paging.hpp"
@@ -29,7 +28,7 @@ namespace vmm {
     };
 
     uintptr_t find_free_addr(const size_t length) {
-        constexpr uintptr_t min_base = paging::PAGE_SIZE;
+        constexpr uintptr_t min_base = 0x10000000;
         const vm_object* current = vm_objs;
         const vm_object* prev = nullptr;
         uintptr_t found = min_base;
@@ -58,7 +57,7 @@ namespace vmm {
         (void)arg;
         length = ((length + paging::PAGE_SIZE - 1) / paging::PAGE_SIZE) * paging::PAGE_SIZE;
 
-        constexpr uintptr_t min_base = paging::PAGE_SIZE;
+        constexpr uintptr_t min_base = 0x10000000;
         vm_object* current = vm_objs;
         vm_object* prev = nullptr;
         uintptr_t found = min_base;
@@ -121,7 +120,7 @@ namespace vmm {
         (void)arg;
         length = ((length + paging::PAGE_SIZE - 1) / paging::PAGE_SIZE) * paging::PAGE_SIZE;
 
-        constexpr uintptr_t min_base = paging::PAGE_SIZE;
+        constexpr uintptr_t min_base = 0x10000000;
         vm_object* current = vm_objs;
         vm_object* prev = nullptr;
         uintptr_t found = min_base;

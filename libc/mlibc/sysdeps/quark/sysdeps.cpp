@@ -5,17 +5,25 @@
 #include <mlibc/all-sysdeps.hpp>
 #include <string.h>
 
-#define SYS_EXIT 0
+// Must match the syscall numbers dispatched in kernel/src/kernel/syscall.cpp's handle_syscall().
+#define SYS_READ 0
 #define SYS_WRITE 1
-#define SYS_MMAP 2
+#define SYS_OPEN 2
+#define SYS_CLOSE 3
+#define SYS_MMAP 4
+#define SYS_MUNMAP 5
+#define SYS_EXEC 6
+#define SYS_FORK 7
+#define SYS_GETPID 8
+#define SYS_SLEEP 9
+#define SYS_EXIT 10
+#define SYS_SET_FS_BASE 11
 
-// ANCHOR: stub
 #define STUB()                                                                                     \
 	({                                                                                             \
 		__ensure(!"STUB function was called");                                                     \
 		__builtin_unreachable();                                                                   \
 	})
-// ANCHOR_END: stub
 
 namespace mlibc {
     void Sysdeps<LibcPanic>::operator()() {
@@ -36,15 +44,16 @@ namespace mlibc {
         return 0;
     }
 
-    int Sysdeps<Write>::operator()(int fd, void const* buf, size_t size, ssize_t* ret) {
+    int Sysdeps<Write>::operator()(const int fd, void const* buf, size_t size, ssize_t* ret) {
         *ret = syscall(SYS_WRITE, fd, buf, size);
-        // this can never fail in the demo os
         return 0;
     }
 
     int Sysdeps<TcbSet>::operator()(void* pointer) {
-        uintptr_t thread_data = reinterpret_cast<uintptr_t>(pointer) + sizeof(Tcb);
-        // asm volatile("mv tp, %0" ::"r"(thread_data));
+        // x86_64 TLS (variant II) expects %fs:0 to hold the TCB pointer itself, unlike the
+        // RISC-V "mv tp" convention this code was originally copied from. Ask the kernel to
+        // set the FS segment base via wrmsr(IA32_FS_BASE, pointer) instead.
+        syscall(SYS_SET_FS_BASE, pointer);
         // this can never fail in the demo os
         return 0;
     }
@@ -72,12 +81,13 @@ namespace mlibc {
         __builtin_unreachable();
     }
 
-    // ANCHOR: stubbed-sysdep
+    int Sysdeps<GetPid>::operator()() {
+        return syscall(SYS_GETPID);
+    }
+
     int Sysdeps<Close>::operator()(int) {
         STUB();
     }
-
-    // ANCHOR_END: stubbed-sysdep
 
     int Sysdeps<FutexWake>::operator()(int*, bool) {
         STUB();

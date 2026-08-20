@@ -1,8 +1,8 @@
 #include "kernel/elf.hpp"
 
 #include <cstdint>
-#include <cstring>
 #include <lib/math.hpp>
+#include <lib/mem.hpp>
 
 #include "kernel/log.hpp"
 #include "kernel/system.hpp"
@@ -164,57 +164,75 @@ namespace elf {
             case ET_EXEC: {
                 const auto img = new ElfImage();
                 img->segment_count = 0;
-                img->base_address = UINT32_MAX;
                 img->image_size = 0;
-                uintptr_t max_end = 0;
+
+                uint64_t img_min = UINT64_MAX;
+                uint64_t img_max = 0;
+
+                for (uint32_t i = 0; i < hdr->phnum; i++) {
+                    const auto phdr = reinterpret_cast<const ElfProgramHeader*>(
+                        reinterpret_cast<const uint8_t*>(hdr) + hdr->phoff)[i];
+
+                    if (phdr.p_type == INTERP) {
+                        logger.error("ELF File is dynamically linked. Dynamic linking is not supported.\n");
+                        return nullptr;
+                    }
+
+                    if (phdr.p_type == LOAD) {
+                        img_min = min(img_min, phdr.p_vaddr & ~(paging::PAGE_SIZE - 1));
+                        img_max = max(
+                            img_max, (phdr.p_vaddr + phdr.p_memsz + paging::PAGE_SIZE - 1) & ~(paging::PAGE_SIZE - 1));
+                    }
+                }
+
+                const uint64_t total_pages = (img_max - img_min + paging::PAGE_SIZE - 1) / paging::PAGE_SIZE;
+                const void* image_phys = mem::allocate_physical_pages(total_pages);
+                if (!image_phys) {
+                    panic("Unable to allocate physical pages for ELF image");
+                }
+
+                const auto image_virt = reinterpret_cast<void*>(
+                    reinterpret_cast<uintptr_t>(image_phys) + paging::g_hhdm_offset
+                );
+                memset(image_virt, 0, total_pages * paging::PAGE_SIZE);
+
+                for (uint64_t p = 0; p < total_pages; p++) {
+                    paging::map_page(
+                        cr3,
+                        img_min + p * paging::PAGE_SIZE,
+                        reinterpret_cast<uintptr_t>(image_phys) + p * paging::PAGE_SIZE,
+                        paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER
+                    );
+                }
+
+                for (uint32_t i = 0; i < hdr->phnum; i++) {
+                    const auto &phdr =
+                        reinterpret_cast<const ElfProgramHeader *>(
+                            reinterpret_cast<const uint8_t *>(hdr) + hdr->phoff)[i];
+                }
+
                 for (uint32_t i = 0; i < hdr->phnum; i++) {
                     const auto phdr = reinterpret_cast<const ElfProgramHeader*>(
                         reinterpret_cast<const uint8_t*>(hdr) + hdr->phoff)[i];
 
                     if (phdr.p_type == LOAD) {
-                        if (phdr.p_align != paging::PAGE_SIZE) {
-                            panic("ELF File segment %u is not page-aligned.\n", i);
-                        }
-                        const uint32_t start_offset = phdr.p_vaddr & (paging::PAGE_SIZE - 1);
-                        const uint32_t start_page = phdr.p_vaddr - start_offset;
-                        const uint32_t num_pages = (start_offset + phdr.p_memsz + (paging::PAGE_SIZE - 1))
-                            / paging::PAGE_SIZE;
+                        const auto src = reinterpret_cast<const uint8_t*>(hdr) + phdr.p_offset;
+                        const auto dst = static_cast<uint8_t*>(image_virt) + (phdr.p_vaddr - img_min);
 
-                        img->base_address = min(img->base_address, start_page);
-                        max_end = max(max_end, start_page + num_pages * paging::PAGE_SIZE);
 
-                        void* page_phys = mem::allocate_physical_pages(num_pages);
-                        const auto page_virt = reinterpret_cast<void*>(
-                            reinterpret_cast<uintptr_t>(page_phys) + paging::g_hhdm_offset
-                        );
-
-                        memset(page_virt, 0, num_pages * paging::PAGE_SIZE);
-
-                        segment seg = {};
-                        seg.virt_base = start_page;
-                        seg.phys_base = reinterpret_cast<uintptr_t>(page_phys);
-                        seg.page_count = num_pages;
-
-                        img->segments[img->segment_count++] = seg;
-                        for (uint32_t p = 0; p < num_pages; p++) {
-                            paging::map_page(
-                                cr3,
-                                start_page + p * paging::PAGE_SIZE,
-                                reinterpret_cast<uintptr_t>(page_phys) + p * paging::PAGE_SIZE,
-                                paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER
-                            );
-                        }
-
-                        memcpy(
-                            static_cast<uint8_t*>(page_virt) + start_offset,
-                            reinterpret_cast<const uint8_t*>(hdr) + phdr.p_offset,
-                            phdr.p_filesz
-                        );
+                        memcpy(dst, src, phdr.p_filesz);
                     }
                 }
 
+                img->segments[0] = {
+                    .virt_base = img_min,
+                    .phys_base = reinterpret_cast<uintptr_t>(image_phys),
+                    .page_count = static_cast<uint32_t>(total_pages)
+                };
+                img->segment_count = 1;
+                img->base_address = img_min;
+                img->image_size = static_cast<uint32_t>(img_max - img_min);
                 img->entry_point = reinterpret_cast<void*>(hdr->entry);
-                img->image_size = static_cast<uint32_t>(max_end - img->base_address);
 
                 return img;
             }

@@ -1,4 +1,6 @@
 .idea/
+!.idea/runConfigurations/
+!.idea/runConfigurations/*.xml
 .run/
 .gdbinit
 .cache
@@ -6,6 +8,3 @@ OVMF_CODE.fd
 build/
 cmake-build-debug/
 
-!.idea/
-!.idea/runConfigurations/
-!.idea/runConfigurations/*.xml

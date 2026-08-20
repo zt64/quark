@@ -1,10 +1,9 @@
 #include "driver/fs/fat32.hpp"
-#include <cstdint>
 #include <cstddef>
 #include <driver/fs/vfs.hpp>
-#include <lib/string.hpp>
-#include <lib/mem.hpp>
 #include <kernel/log.hpp>
+#include <lib/mem.hpp>
+#include <lib/string.hpp>
 
 // bios parameter block
 struct bpb {
@@ -43,7 +42,7 @@ struct ebr_32 {
     uint16_t boot_signature;
 } __attribute__((packed));
 
-struct fs_info {
+struct fs_info_t {
     uint32_t lead_signature;
     uint8_t reserved[480];
     uint32_t signature;
@@ -118,7 +117,7 @@ namespace fat32 {
 
     inline uint32_t calculate_lba(const fat32_volume& volume, const uint32_t cluster) {
         return ((cluster - 2) * volume.sectors_per_cluster) +
-                volume.first_data_sector;
+            volume.first_data_sector;
     }
 
     constexpr uint8_t LAST_LFN_ENTRY = 0x40;
@@ -260,25 +259,52 @@ namespace fat32 {
         return true;
     }
 
+    size_t stat(const char* path, vfs::stat_t* result) {
+        vfs::dir_entry entry;
+
+        if (!resolve_path(path, entry)) return 0;
+
+        result->inode = entry.inode;
+        result->size = entry.size;
+
+        return sizeof(vfs::stat_t);
+    }
+
     size_t read(const char* path, uint8_t* buffer, const uint32_t max_size) {
         vfs::dir_entry entry;
 
-        if (!resolve_path(path, entry)) {
-            return 0; // Path not found
-        }
+        if (!resolve_path(path, entry))
+            return 0;
 
         uint32_t cluster = static_cast<uint32_t>(entry.inode);
         size_t bytes_read = 0;
 
-        while (cluster < EOF_MARKER && bytes_read < max_size) {
+        const size_t file_size = entry.size;
+        const size_t bytes_to_read = file_size < max_size ? file_size : max_size;
+
+        while (cluster < EOF_MARKER && bytes_read < bytes_to_read) {
             const uint32_t first_sector_of_cluster = calculate_lba(volume, cluster);
-            const uint8_t* cluster_data = static_cast<const uint8_t*>(volume.module_addr) + (first_sector_of_cluster * volume.bytes_per_sector);
-            const size_t bytes_to_copy = (max_size - bytes_read < volume.bytes_per_sector * volume.sectors_per_cluster) ? (max_size - bytes_read) : (volume.bytes_per_sector * volume.sectors_per_cluster);
+
+            const uint8_t* cluster_data = static_cast<const uint8_t*>(volume.module_addr) +
+                first_sector_of_cluster * volume.bytes_per_sector;
+
+            const size_t cluster_size = volume.bytes_per_sector * volume.sectors_per_cluster;
+            const size_t remaining = bytes_to_read - bytes_read;
+
+            const size_t bytes_to_copy = remaining < cluster_size ? remaining : cluster_size;
 
             memcpy(buffer + bytes_read, cluster_data, bytes_to_copy);
 
             bytes_read += bytes_to_copy;
-            cluster = read_fat_entry(volume.module_addr, volume.first_fat_sector, volume.bytes_per_sector, cluster);
+
+            if (bytes_read >= bytes_to_read) break;
+
+            cluster = read_fat_entry(
+                volume.module_addr,
+                volume.first_fat_sector,
+                volume.bytes_per_sector,
+                cluster
+            );
         }
 
         return bytes_read;
@@ -311,7 +337,7 @@ namespace fat32 {
 
     bool lookup(const uint32_t directory_cluster, const char* name, vfs::dir_entry& result) {
         vfs::dir_entry entries[64];
-        logger.info("Looking for '%s' in cluster %u", name, directory_cluster);
+        logger.debug("Looking for '%s' in cluster %u", name, directory_cluster);
         const size_t count = read_directory(directory_cluster, entries, sizeof(entries) / sizeof(vfs::dir_entry));
 
         for (size_t i = 0; i < count; i++) {
@@ -329,19 +355,20 @@ namespace fat32 {
         const auto* fat_boot = static_cast<const bpb*>(module_addr);
         const auto* ext = reinterpret_cast<const ebr_32*>(static_cast<const uint8_t*>(module_addr) + sizeof(
             bpb));
-        const auto* filesystem_info = reinterpret_cast<const fs_info*>(static_cast<const uint8_t*>(module_addr) + sizeof(bpb) +
+        const auto* fs_info = reinterpret_cast<const fs_info_t*>(static_cast<const uint8_t*>(module_addr) + sizeof
+            (bpb) +
             sizeof(ebr_32));
 
-        if (filesystem_info->lead_signature != 0x41615252) {
-            logger.warn("Unexpected lead signature in FS Info: 0x%X", filesystem_info->lead_signature);
+        if (fs_info->lead_signature != 0x41615252) {
+            logger.warn("Unexpected lead signature in FS Info: 0x%X", fs_info->lead_signature);
         }
 
-        if (filesystem_info->signature != 0x61417272) {
-            logger.warn("Unexpected signature in FS Info: 0x%X", filesystem_info->signature);
+        if (fs_info->signature != 0x61417272) {
+            logger.warn("Unexpected signature in FS Info: 0x%X", fs_info->signature);
         }
 
-        if (filesystem_info->trail_signature != 0xAA550000) {
-            logger.warn("Unexpected trail signature in FS Info: 0x%X", filesystem_info->trail_signature);
+        if (fs_info->trail_signature != 0xAA550000) {
+            logger.warn("Unexpected trail signature in FS Info: 0x%X", fs_info->trail_signature);
         }
 
         const uint32_t root_dir_sectors = ((fat_boot->root_entries * 32) + (fat_boot->bytes_per_sector - 1)) / fat_boot
@@ -358,11 +385,10 @@ namespace fat32 {
         const uint32_t first_fat_sector = fat_boot->reserved_sectors;
 
         uint32_t sectorsize = 0;
+
         fat_type type;
 
-        if (sectorsize == 0) {
-            type = ExFAT;
-        } else if (total_clusters < 4085) {
+        if (total_clusters < 4085) {
             type = FAT12;
         } else if (total_clusters < 65525) {
             type = FAT16;

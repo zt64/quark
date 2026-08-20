@@ -1,6 +1,6 @@
 #pragma once
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 namespace vfs {
     struct file {
@@ -12,6 +12,11 @@ namespace vfs {
         char name[255];
         uint32_t file_count;
         file* files;
+    };
+
+    struct stat_t {
+        uint64_t inode;
+        uint64_t size;
     };
 
     enum class file_type : uint8_t {
@@ -35,6 +40,8 @@ namespace vfs {
     void init();
 
     void mount(const char* path);
+
+    size_t stat(const char* path, stat_t* buffer);
     uint32_t open(const char* path, uint32_t flags);
     size_t read(const char* path, uint8_t* buffer, uint32_t size);
     size_t readdir(const char* path, dir_entry* entries, uint32_t max_entries);

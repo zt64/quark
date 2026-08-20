@@ -2,127 +2,74 @@
 #include <errno.h>
 
 extern "C" long __do_syscall_ret(unsigned long ret) {
-    return ret;
+    if (static_cast<long>(ret) < 0) {
+        errno = static_cast<int>(-ret);
+        return -1;
+    }
+    return static_cast<long>(ret);
 }
 
 using sc_word_t = long;
 
 sc_word_t __do_syscall0(long sc) {
-    return 0;
-    // register int sc_reg asm("a7") = sc;
-    // register sc_word_t ret asm("a0");
-    // asm volatile ("ecall" : "=r"(ret) : "r"(sc_reg) : "memory", "a1");
-    // return ret;
+    long ret;
+    asm volatile ("int $0x80"
+        : "=a"(ret)
+        : "a"(sc)
+        : "memory", "cc");
+    return ret;
 }
 
-sc_word_t __do_syscall1(long sc,
-                        sc_word_t arg1) {
-    return 0;
-    // register int sc_reg asm("a7") = sc;
-    // register sc_word_t arg1_reg asm("a0") = arg1;
-    // register sc_word_t ret asm("a0");
-    // asm volatile ("ecall" : "=r"(ret) :
-    // 		"r"(sc_reg),
-    // 		"r"(arg1_reg)
-    // 		: "memory", "a1");
-    // return ret;
+sc_word_t __do_syscall1(long sc, sc_word_t arg1) {
+    long ret;
+    asm volatile ("int $0x80"
+        : "=a"(ret)
+        : "a"(sc), "b"(arg1)
+        : "memory", "cc");
+    return ret;
 }
 
-sc_word_t __do_syscall2(long sc,
-                        sc_word_t arg1, sc_word_t arg2) {
-    return 0;
-    // register int sc_reg asm("a7") = sc;
-    // register sc_word_t arg1_reg asm("a0") = arg1;
-    // register sc_word_t arg2_reg asm("a1") = arg2;
-    // register sc_word_t ret asm("a0");
-    // asm volatile ("ecall" : "=r"(ret) :
-    // 		"r"(sc_reg),
-    // 		"r"(arg1_reg),
-    // 		"r"(arg2_reg)
-    // 		: "memory");
-    // return ret;
+sc_word_t __do_syscall2(long sc, sc_word_t arg1, sc_word_t arg2) {
+    long ret;
+    asm volatile ("int $0x80"
+        : "=a"(ret)
+        : "a"(sc), "b"(arg1), "c"(arg2)
+        : "memory", "cc");
+    return ret;
 }
 
-sc_word_t __do_syscall3(long sc,
-                        sc_word_t arg1, sc_word_t arg2, sc_word_t arg3) {
-    return 0;
-    // register int sc_reg asm("a7") = sc;
-    // register sc_word_t arg1_reg asm("a0") = arg1;
-    // register sc_word_t arg2_reg asm("a1") = arg2;
-    // register sc_word_t arg3_reg asm("a2") = arg3;
-    // register sc_word_t ret asm("a0");
-    // asm volatile ("ecall" : "=r"(ret) :
-    // 		"r"(sc_reg),
-    // 		"r"(arg1_reg),
-    // 		"r"(arg2_reg),
-    // 		"r"(arg3_reg)
-    // 		: "memory");
-    // return ret;
+sc_word_t __do_syscall3(long sc, sc_word_t arg1, sc_word_t arg2, sc_word_t arg3) {
+    long ret;
+    asm volatile ("int $0x80"
+        : "=a"(ret)
+        : "a"(sc), "b"(arg1), "c"(arg2), "d"(arg3)
+        : "memory", "cc");
+    return ret;
 }
 
-sc_word_t __do_syscall4(long sc,
-                        sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
-                        sc_word_t arg4) {
-    return 0;
-    // register int sc_reg asm("a7") = sc;
-    // register sc_word_t arg1_reg asm("a0") = arg1;
-    // register sc_word_t arg2_reg asm("a1") = arg2;
-    // register sc_word_t arg3_reg asm("a2") = arg3;
-    // register sc_word_t arg4_reg asm("a3") = arg4;
-    // register sc_word_t ret asm("a0");
-    // asm volatile ("ecall" : "=r"(ret) :
-    // 		"r"(sc_reg),
-    // 		"r"(arg1_reg),
-    // 		"r"(arg2_reg),
-    // 		"r"(arg3_reg),
-    // 		"r"(arg4_reg)
-    // 		: "memory");
-    // return ret;
+sc_word_t __do_syscall4(long sc, sc_word_t arg1, sc_word_t arg2, sc_word_t arg3, sc_word_t arg4) {
+    long ret;
+    asm volatile ("int $0x80"
+        : "=a"(ret)
+        : "a"(sc), "b"(arg1), "c"(arg2), "d"(arg3), "S"(arg4)
+        : "memory", "cc");
+    return ret;
 }
 
-sc_word_t __do_syscall5(long sc,
-                        sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
-                        sc_word_t arg4, sc_word_t arg5) {
-    return 0;
-    // register int sc_reg asm("a7") = sc;
-    // register sc_word_t arg1_reg asm("a0") = arg1;
-    // register sc_word_t arg2_reg asm("a1") = arg2;
-    // register sc_word_t arg3_reg asm("a2") = arg3;
-    // register sc_word_t arg4_reg asm("a3") = arg4;
-    // register sc_word_t arg5_reg asm("a4") = arg5;
-    // register sc_word_t ret asm("a0");
-    // asm volatile ("ecall" : "=r"(ret) :
-    // 		"r"(sc_reg),
-    // 		"r"(arg1_reg),
-    // 		"r"(arg2_reg),
-    // 		"r"(arg3_reg),
-    // 		"r"(arg4_reg),
-    // 		"r"(arg5_reg)
-    // 		: "memory");
-    // return ret;
+sc_word_t __do_syscall5(long sc, sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
+                         sc_word_t arg4, sc_word_t arg5) {
+    long ret;
+    asm volatile ("int $0x80"
+        : "=a"(ret)
+        : "a"(sc), "b"(arg1), "c"(arg2), "d"(arg3), "S"(arg4), "D"(arg5)
+        : "memory", "cc");
+    return ret;
 }
 
-sc_word_t __do_syscall6(long sc,
-                        sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
-                        sc_word_t arg4, sc_word_t arg5, sc_word_t arg6) {
-    return 0;
-    // register int sc_reg asm("a7") = sc;
-    // register sc_word_t arg1_reg asm("a0") = arg1;
-    // register sc_word_t arg2_reg asm("a1") = arg2;
-    // register sc_word_t arg3_reg asm("a2") = arg3;
-    // register sc_word_t arg4_reg asm("a3") = arg4;
-    // register sc_word_t arg5_reg asm("a4") = arg5;
-    // register sc_word_t arg6_reg asm("a5") = arg6;
-    // register sc_word_t ret asm("a0");
-    // asm volatile ("ecall" : "=r"(ret) :
-    // 		"r"(sc_reg),
-    // 		"r"(arg1_reg),
-    // 		"r"(arg2_reg),
-    // 		"r"(arg3_reg),
-    // 		"r"(arg4_reg),
-    // 		"r"(arg5_reg),
-    // 		"r"(arg6_reg)
-    // 		: "memory"
-    // 		);
-    // return ret;
+sc_word_t __do_syscall6(long sc, sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
+                         sc_word_t arg4, sc_word_t arg5, sc_word_t arg6) {
+    // Your kernel's handle_syscall only reads rbx/rcx/rdx/rsi/rdi — no 6th argument register.
+    // If you need a 6-arg syscall, extend handle_syscall's register set first.
+    (void)arg6;
+    return __do_syscall5(sc, arg1, arg2, arg3, arg4, arg5);
 }

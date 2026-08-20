@@ -10,7 +10,9 @@
 #include <kernel/scheduler.hpp>
 #include <kernel/userspace.hpp>
 #include <memory/paging.hpp>
+#include <memory/pmm.hpp>
 #include <memory/vmm.hpp>
+#include "arch/msr.hpp"
 #include "kernel/stdio.hpp"
 
 static size_t sys_read(const uint32_t fd, void* buf, const size_t count) {
@@ -64,10 +66,20 @@ static size_t align_up(const size_t v, const size_t align) {
     return (v + (align - 1)) & ~(align - 1);
 }
 
+// fd == 3 is our ad-hoc convention for mapping the framebuffer; anything else (including the
+// standard anonymous-mapping convention of fd == -1) allocates fresh, zeroed physical memory.
+constexpr int MMAP_FD_FRAMEBUFFER = 3;
+
 static void* sys_mmap(
     const void* addr, const size_t length, const int prot, const int flags, const int fd
 ) {
-    // sys_mmap: fd == 3 means framebuffer
+    (void)prot;
+    (void)flags;
+
+    if (length == 0) {
+        return nullptr;
+    }
+
     uintptr_t user_base;
 
     if (addr == nullptr) {
@@ -76,28 +88,54 @@ static void* sys_mmap(
         user_base = reinterpret_cast<uintptr_t>(addr);
     }
 
-    const uintptr_t fb_virt = reinterpret_cast<uintptr_t>(screen::framebuffer.addr);
+    if (fd == MMAP_FD_FRAMEBUFFER) {
+        const uintptr_t fb_virt = reinterpret_cast<uintptr_t>(screen::framebuffer.addr);
 
-    uintptr_t fb_phys;
-    if (!paging::translate(fb_virt, fb_phys)) {
+        uintptr_t fb_phys;
+        if (!paging::translate(fb_virt, fb_phys)) {
+            return nullptr;
+        }
+
+        const size_t size = screen::framebuffer.pitch * screen::framebuffer.height;
+        const uintptr_t phys_page = fb_phys & ~(paging::PAGE_SIZE - 1);
+        const size_t page_offset = fb_phys & (paging::PAGE_SIZE - 1);
+        const size_t map_size = align_up(size + page_offset, paging::PAGE_SIZE);
+
+        // Reserve user virtual space, but map phys_page + offset rather than allocating pages.
+        for (size_t map_offset = 0; map_offset < map_size; map_offset += paging::PAGE_SIZE) {
+            paging::map_page(
+                current->cr3,
+                user_base + map_offset,
+                phys_page + map_offset,
+                paging::PAGE_USER | paging::PAGE_WRITABLE);
+        }
+
+        return reinterpret_cast<void*>(user_base + page_offset);
+    }
+
+    // Anonymous (or otherwise unsupported) mapping: back it with real, zeroed physical memory
+    // sized to the actual request instead of aliasing the framebuffer.
+    const size_t map_size = align_up(length, paging::PAGE_SIZE);
+    const size_t page_count = map_size / paging::PAGE_SIZE;
+
+    const void* phys = mem::allocate_physical_pages(page_count);
+    if (!phys) {
         return nullptr;
     }
 
-    const size_t size = screen::framebuffer.pitch * screen::framebuffer.height;
-    const uintptr_t phys_page = fb_phys & ~(paging::PAGE_SIZE - 1);
-    const size_t page_offset = fb_phys & (paging::PAGE_SIZE - 1);
-    const size_t map_size = align_up(size + page_offset, paging::PAGE_SIZE);
+    const auto phys_base = reinterpret_cast<uintptr_t>(phys);
 
-    // Reserve user virtual space, but map phys_page + offset rather than allocating pages.
     for (size_t map_offset = 0; map_offset < map_size; map_offset += paging::PAGE_SIZE) {
-        paging::map_page(
+        if (!paging::map_page(
             current->cr3,
             user_base + map_offset,
-            phys_page + map_offset,
-            paging::PAGE_USER | paging::PAGE_WRITABLE);
+            phys_base + map_offset,
+            paging::PAGE_USER | paging::PAGE_WRITABLE)) {
+            logger.error("sys_mmap: failed to map page at 0x%lx", user_base + map_offset);
+        }
     }
 
-    return reinterpret_cast<void*>(user_base + page_offset);
+    return reinterpret_cast<void*>(user_base);
 }
 
 static size_t sys_munmap(const void* addr, const size_t length, const int prot, const int flags) {
@@ -198,8 +236,28 @@ static size_t sys_sleep(const uint32_t milliseconds) {
     return 0;
 }
 
+[[noreturn]] static void sys_exit(const int status) {
+    // TODO: proper task teardown (unlink from scheduler list, free address space/resources).
+    panic("Task pid=%u exited with status %d (task termination is not yet implemented)", current->pid, status);
+}
+
+constexpr uint32_t IA32_FS_BASE = 0xC0000100;
+
+static size_t sys_set_fs_base(const uint64_t base) {
+    // Sets the current task's %fs segment base, used by mlibc/rtld for TLS (thread pointer).
+    // Persisted on the task struct so it is restored by switch_to_task() on every context switch.
+    current->fs_base = base;
+    const uint32_t lo = static_cast<uint32_t>(base);
+    const uint32_t hi = static_cast<uint32_t>(base >> 32);
+    arch::cpu_set_msr(IA32_FS_BASE, lo, hi);
+    return 0;
+}
+
 extern "C" void handle_syscall(regs* r) {
     const uint32_t syscall_number = r->rax;
+
+    logger.debug("handle_syscall: syscall_number=%u, rbx=0x%lx, rcx=0x%lx, rdx=0x%lx, rsi=0x%lx, rdi=0x%lx",
+        syscall_number, r->rbx, r->rcx, r->rdx, r->rsi, r->rdi);
 
     switch (syscall_number) {
         case 0:
@@ -238,6 +296,13 @@ extern "C" void handle_syscall(regs* r) {
             break;
         case 9:
             r->rax = sys_sleep(r->rbx);
+            break;
+        case 10:
+            sys_exit(static_cast<int>(r->rbx));
+            break;
+        case 11:
+            r->rax = sys_set_fs_base(r->rbx);
+            logger.debug("handle_syscall: set_fs_base to 0x%lx", r->rbx);
             break;
         default:
             r->rax = static_cast<uint64_t>(-1);

@@ -1,9 +1,7 @@
 #include "lib/format.hpp"
-#include "lib/mem.hpp"
-#include "lib/stdlib.hpp"
 #include <cstdarg>
 #include <cstdint>
-#include <cwchar>
+#include "lib/stdlib.hpp"
 
 namespace {
     struct OutBuf {

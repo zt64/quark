@@ -1,4 +1,3 @@
-#include <asm-generic/errno-base.h>
 #include <uacpi/uacpi.h>
 
 #include "driver/acpi.hpp"
@@ -10,7 +9,7 @@ namespace acpi {
 
         if (uacpi_unlikely_error(ret)) {
             logger.error("uacpi_setup_early_table_access error: %s", uacpi_status_to_string(ret));
-            return -ENODEV;
+            return -1;
         }
 
         return 0;

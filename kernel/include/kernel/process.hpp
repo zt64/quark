@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstdint>
-
 #include "system.hpp"
 
 
@@ -18,6 +16,7 @@ struct task {
     void* rsp;
     void* rsp0;
     uint64_t cr3;
+    uint64_t fs_base; // %fs segment base (TLS thread pointer), restored on every task switch
     task* next;
     task* parent;
     regs* trap_frame;

@@ -70,7 +70,12 @@ namespace userspace {
         (void)envp;
         (void)env_vars;
 
-        constexpr uint32_t max_buffer_size = 512 * 512; // 256 KiB
+        vfs::stat_t stat;
+        if (!vfs::stat(path, &stat)) {
+            panic("Failed to stat %s", path);
+        }
+
+        const uint32_t max_buffer_size = stat.size;
         const auto init_buffer = static_cast<uint8_t*>(malloc(max_buffer_size));
 
         if (!init_buffer) {
@@ -80,20 +85,20 @@ namespace userspace {
             panic("Failed to read %s", path);
         }
 
-        const auto snell_buffer = static_cast<uint8_t*>(malloc(max_buffer_size));
-
-        if (!snell_buffer) {
-            panic("Failed to allocate buffer");
-        }
-        if (!vfs::read("/BOOT/SNELL", snell_buffer, max_buffer_size)) {
-            panic("Failed to read /BOOT/SNELL");
-        }
+        // const auto snell_buffer = static_cast<uint8_t*>(malloc(max_buffer_size));
+        //
+        // if (!snell_buffer) {
+        //     panic("Failed to allocate buffer");
+        // }
+        // if (!vfs::read("/BOOT/SNELL", snell_buffer, max_buffer_size)) {
+        //     panic("Failed to read /BOOT/SNELL");
+        // }
 
         current = create_task(reinterpret_cast<uintptr_t>(init_buffer));
-        task* next = create_task(reinterpret_cast<uintptr_t>(snell_buffer));
+        // task* next = create_task(reinterpret_cast<uintptr_t>(snell_buffer));
 
-        current->next = next;
-        next->next = current;
+        // current->next = next;
+        // next->next = current;
 
         enter_task(current);
         __builtin_unreachable();

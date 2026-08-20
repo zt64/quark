@@ -1,8 +1,5 @@
 #include "kernel/scheduler.hpp"
-
-#include <kernel/log.hpp>
 #include <kernel/process.hpp>
-#include <kernel/tss.hpp>
 
 namespace scheduler {
     void reschedule() {

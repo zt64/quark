@@ -1,60 +1,85 @@
+cmake_minimum_required(VERSION 3.20)
+project(quark-toolchain LANGUAGES NONE)
+
 if (POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif ()
 
-set(QUARK_TARGET x86_64-quark)
-
 include(ExternalProject)
 
-find_program(GIT_EXE NAMES git REQUIRED)
+# Repository root
+get_filename_component(QUARK_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
-set(QUARK_DL_CACHE ${CMAKE_SOURCE_DIR}/.cache/downloads)
-file(MAKE_DIRECTORY ${QUARK_DL_CACHE})
+set(QUARK_TARGET x86_64-quark)
 
+# Install locations
+set(TOOLCHAIN_PREFIX "$ENV{HOME}/opt/cross")
+set(QUARK_SYSROOT "$ENV{HOME}/opt/quark-sysroot")
+
+set(QUARK_DL_CACHE "${QUARK_ROOT}/.cache/downloads")
+file(MAKE_DIRECTORY "${QUARK_DL_CACHE}")
+
+find_program(MESON_EXE meson REQUIRED)
+find_program(NINJA_EXE ninja REQUIRED)
+
+configure_file(
+        "${QUARK_ROOT}/toolchain/quark-cross.ini.in"
+        "${CMAKE_BINARY_DIR}/quark-cross.ini"
+        @ONLY
+)
+
+#
+# mlibc headers
+#
+ExternalProject_Add(mlibc_headers
+        SOURCE_DIR "${QUARK_ROOT}/libc/mlibc"
+
+        CONFIGURE_COMMAND ${MESON_EXE} setup
+        --cross-file ${CMAKE_BINARY_DIR}/quark-cross.ini
+        --prefix=/usr
+        -Dheaders_only=true
+        <BINARY_DIR> <SOURCE_DIR>
+
+        BUILD_COMMAND ""
+
+        INSTALL_COMMAND ${CMAKE_COMMAND} -E env DESTDIR=${QUARK_SYSROOT} ${NINJA_EXE} -C <BINARY_DIR> install
+)
+
+#
+# Binutils
+#
 ExternalProject_Add(binutils_build
-        URL https://ftpmirror.gnu.org/binutils/binutils-2.45.1.tar.xz
-        URL_HASH SHA256=5fe101e6fe9d18fdec95962d81ed670fdee5f37e3f48f0bef87bddf862513aa5
+        URL https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz
+        URL_HASH SHA256=154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff
         DOWNLOAD_DIR ${QUARK_DL_CACHE}
         DOWNLOAD_NO_PROGRESS TRUE
-        # Without this, ExternalProject re-runs its "update" check on every
-        # single build invocation (even for plain URL sources with nothing to
-        # update), which touches a stamp file and cascades into needless
-        # re-patch/re-configure/re-build of the whole project every time you
-        # build ANY target, even ones unrelated to binutils.
         UPDATE_DISCONNECTED TRUE
-        PATCH_COMMAND patch -p1 --forward < ${CMAKE_SOURCE_DIR}/toolchain/patches/binutils-quark.patch
+        PATCH_COMMAND patch -p1 --forward < ${QUARK_ROOT}/toolchain/patches/binutils-quark.patch
         CONFIGURE_COMMAND <SOURCE_DIR>/configure
-        --target=${QUARK_TARGET} --prefix=${TOOLCHAIN_PREFIX}
+        --target=${QUARK_TARGET}
+        --prefix=${TOOLCHAIN_PREFIX}
         --with-sysroot=${QUARK_SYSROOT}
-        --disable-werror --enable-default-execstack=no
-        BUILD_COMMAND make -j${CMAKE_BUILD_PARALLEL_LEVEL}
+        --disable-werror
+        --enable-default-execstack=no
+        BUILD_COMMAND make -j14
         INSTALL_COMMAND make install
         BUILD_BYPRODUCTS ${TOOLCHAIN_PREFIX}/bin/${QUARK_TARGET}-ld
 )
 
-set(QUARK_TARGET x86_64-quark)
-set(QUARK_DL_CACHE ${CMAKE_SOURCE_DIR}/.cache/downloads)
-
-# ==============================================================================
-# STEP 1: GCC STAGE 1 (Bootstrap C Compiler Only)
-# ==============================================================================
-# This step does NOT build target libraries like libstdc++. It only builds the
-# bare compiler and libgcc so that Meson can use it to build mlibc.
-# ==============================================================================
-#url https://free.nchc.org.tw/gcc/releases/gcc-15.3.0/gcc-15.3.0.tar.xz
+#
+# GCC Stage 1
+#
 ExternalProject_Add(gcc_bootstrap
         DEPENDS binutils_build mlibc_headers
-        URL https://free.nchc.org.tw/gcc/releases/gcc-15.3.0/gcc-15.3.0.tar.xz
+        URL https://ftp.gnu.org/gnu/gcc/gcc-15.3.0/gcc-15.3.0.tar.xz
         URL_HASH SHA256=fa59c1beef8995f27c4d71c1df227587189315d3e6faff1bb4306e61b0c530eb
         DOWNLOAD_DIR ${QUARK_DL_CACHE}
         DOWNLOAD_NO_PROGRESS TRUE
-        # See binutils_build's comment: prevents a needless "update" check
-        # (and the full re-patch/re-configure/re-build cascade it triggers)
-        # from running on every single build invocation.
         UPDATE_DISCONNECTED TRUE
-        PATCH_COMMAND patch -p1 --forward < ${CMAKE_SOURCE_DIR}/toolchain/patches/gcc-quark.patch
+        PATCH_COMMAND patch -p1 --forward < ${QUARK_ROOT}/toolchain/patches/gcc-quark.patch
 
-        CONFIGURE_COMMAND <SOURCE_DIR>/configure
+        CONFIGURE_COMMAND
+        <SOURCE_DIR>/configure
         --target=${QUARK_TARGET}
         --prefix=${TOOLCHAIN_PREFIX}
         --with-sysroot=${QUARK_SYSROOT}
@@ -66,51 +91,53 @@ ExternalProject_Add(gcc_bootstrap
         --disable-hosted-libstdcxx
         --without-headers
 
-        # Stage 1 must stay compiler-only: libstdc++ is built later, once the
-        # target libc headers are installed in the sysroot. Building it here with
-        # --without-headers leaves the C++ compatibility wrappers (e.g. cwchar)
-        # half-installed and breaks every subsequent userspace build.
         BUILD_COMMAND ${CMAKE_COMMAND} -E env PATH=${TOOLCHAIN_PREFIX}/bin:$ENV{PATH}
-        sh -c "make all-gcc all-target-libgcc -j8"
+        sh -c "make all-gcc all-target-libgcc -j14"
 
         INSTALL_COMMAND ${CMAKE_COMMAND} -E env PATH=${TOOLCHAIN_PREFIX}/bin:$ENV{PATH}
         sh -c "make install-gcc install-target-libgcc"
 )
 
+#
+# mlibc
+#
+ExternalProject_Add(mlibc_build
+        SOURCE_DIR "${QUARK_ROOT}/libc/mlibc"
+        DEPENDS mlibc_headers gcc_bootstrap
+        CONFIGURE_COMMAND ${MESON_EXE} setup
+        --cross-file ${CMAKE_BINARY_DIR}/quark-cross.ini
+        --prefix=/usr -Ddefault_library=static -Dno_headers=true
+        -Duse_freestnd_hdrs=enabled
+        <BINARY_DIR> <SOURCE_DIR>
+        BUILD_COMMAND ${NINJA_EXE} -C <BINARY_DIR>
+        INSTALL_COMMAND ${CMAKE_COMMAND} -E env DESTDIR=${QUARK_SYSROOT} ${NINJA_EXE} -C <BINARY_DIR> install
+        BUILD_BYPRODUCTS ${QUARK_SYSROOT}/usr/lib/libc.a
+)
 
-# ==============================================================================
-# STEP 3: GCC STAGE 2 (Final C/C++ Compiler & Libstdc++)
-# ==============================================================================
-# This step depends on mlibc_build. Because libc.a is now present in the
-# sysroot, the libstdc++-v3 configure script will successfully pass link tests.
-# ==============================================================================
+#
+# GCC Stage 2
+#
 ExternalProject_Add(gcc_final
         DEPENDS mlibc_build
         URL https://free.nchc.org.tw/gcc/releases/gcc-15.3.0/gcc-15.3.0.tar.xz
         URL_HASH SHA256=fa59c1beef8995f27c4d71c1df227587189315d3e6faff1bb4306e61b0c530eb
         DOWNLOAD_DIR ${QUARK_DL_CACHE}
         DOWNLOAD_NO_PROGRESS TRUE
-        # See binutils_build's comment above.
         UPDATE_DISCONNECTED TRUE
-        PATCH_COMMAND patch -p1 --forward < ${CMAKE_SOURCE_DIR}/toolchain/patches/gcc-quark.patch
-
+        PATCH_COMMAND patch -p1 --forward < ${QUARK_ROOT}/toolchain/patches/gcc-quark.patch
         CONFIGURE_COMMAND <SOURCE_DIR>/configure
         --target=${QUARK_TARGET}
         --prefix=${TOOLCHAIN_PREFIX}
         --with-sysroot=${QUARK_SYSROOT}
+        --with-native-system-header-dir=/usr/include
         --enable-languages=c,c++
         --disable-multilib
         --disable-nls
-        --disable-shared
-        --disable-threads
-
-        # Final stage has a usable target libc in the sysroot, so libstdc++ can
-        # configure and install the C++ compatibility wrappers such as cwchar.
-        BUILD_COMMAND
-        ${CMAKE_COMMAND} -E env PATH=${TOOLCHAIN_PREFIX}/bin:$ENV{PATH}
-        sh -c "make -j8"
-
-        INSTALL_COMMAND
-        ${CMAKE_COMMAND} -E env PATH=${TOOLCHAIN_PREFIX}/bin:$ENV{PATH}
+        --enable-shared
+        --enable-host-shared
+        BUILD_COMMAND ${CMAKE_COMMAND} -E env PATH=${TOOLCHAIN_PREFIX}/bin:$ENV{PATH} sh -c "make all-gcc all-target-libgcc all-target-libstdc++-v3 -j14"
+        INSTALL_COMMAND ${CMAKE_COMMAND} -E env PATH=${TOOLCHAIN_PREFIX}/bin:$ENV{PATH}
         sh -c "make install-gcc install-target-libgcc install-target-libstdc++-v3"
 )
+
+add_custom_target(toolchain ALL DEPENDS gcc_final)

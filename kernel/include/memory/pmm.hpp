@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 
 namespace mem {
     // Initialize the physical memory manager

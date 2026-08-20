@@ -2,7 +2,8 @@
 
 #include <cstdint>
 
-constexpr size_t heap_max = 1024 * 1024 * 16; // 16 MB
+// TODO: This should be replaced with a proper heap allocator
+constexpr size_t heap_max = 1024 * 1024 * 64; // 64 MB
 alignas(16) static uint8_t heap_buf[heap_max];
 
 static uint8_t* heap_end = heap_buf + heap_max;
@@ -22,6 +23,7 @@ void* malloc(const size_t size) {
     if (p + asize > heap_end) {
         return nullptr;
     }
+
     heap_ptr = p + asize;
     return p;
 }

@@ -3,32 +3,31 @@
 #include <mlibc/sysdep-signatures.hpp>
 
 namespace mlibc {
+    struct QuarkSysdepTags :
+        LibcPanic,
+        LibcLog,
+        Isatty,
+        Write,
+        TcbSet,
+        AnonAllocate,
+        AnonFree,
+        Seek,
+        Exit,
+        Close,
+        FutexWake,
+        FutexWait,
+        Read,
+        Open,
+        VmMap,
+        VmUnmap,
+        ClockGet,
+        GetPid {
+    };
 
-struct DemoSysdepTags :
-	LibcPanic,
-	LibcLog,
-	Isatty,
-	Write,
-	TcbSet,
-	AnonAllocate,
-	AnonFree,
-	Seek,
-	Exit,
-	Close,
-	FutexWake,
-	FutexWait,
-	Read,
-	Open,
-	VmMap,
-	VmUnmap,
-	ClockGet
-{};
+    template <typename Tag>
+    using Sysdeps = SysdepOf<QuarkSysdepTags, Tag>;
 
-template<typename Tag>
-using Sysdeps = SysdepOf<DemoSysdepTags, Tag>;
-
-struct SysdepTraits {
-	static constexpr bool usesRtNetlink = false;
-};
-
+    struct SysdepTraits {
+        static constexpr bool usesRtNetlink = false;
+    };
 } // namespace mlibc

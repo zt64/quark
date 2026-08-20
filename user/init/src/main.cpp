@@ -4,7 +4,7 @@
 int main() {
     const size_t curr_pid = getpid();
 
-    printf("%lu: Starting", curr_pid);
+    write(1, "hi", 2);
 
     // const size_t pid = fork();
 

@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
+
+if (NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain/quark-toolchain.cmake")
+endif ()
+
 project(quark LANGUAGES C CXX ASM_NASM)
 
 set(CMAKE_C_IMPLICIT_LINK_LIBRARIES "")
@@ -13,109 +18,107 @@ set(CMAKE_ASM_NASM_OBJECT_FORMAT elf64)
 set(CMAKE_ASM_NASM_COMPILE_OBJECT "<CMAKE_ASM_NASM_COMPILER> <INCLUDES> -f ${CMAKE_ASM_NASM_OBJECT_FORMAT} -o <OBJECT> <SOURCE>")
 
 set(KERNEL_TARGET quark)
+set(QUARK_TARGET x86_64-quark)
+set(TOOLCHAIN_PREFIX "$ENV{HOME}/opt/cross" CACHE PATH "")
+set(QUARK_SYSROOT "$ENV{HOME}/opt/quark-sysroot" CACHE PATH "")
+set(CMAKE_INSTALL_PREFIX ${QUARK_SYSROOT} CACHE PATH "" FORCE)
 
 add_library(quark_freestanding_options INTERFACE)
+
 target_compile_options(quark_freestanding_options INTERFACE
+        -ffreestanding
         -fno-builtin
         -fno-stack-protector
+        -fno-pic
+        -fno-pie
         -mno-red-zone
         -mno-mmx
         -mno-avx
         -mno-avx512f
-        -fno-pic
-        -fno-pie
+
         $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
         $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
 )
 
+add_library(quark_debug_options INTERFACE)
+
+target_compile_options(quark_debug_options INTERFACE
+        $<$<CONFIG:Debug>:-O0>
+        $<$<CONFIG:Debug>:-ggdb3>
+        $<$<CONFIG:Debug>:-gdwarf-5>
+        $<$<CONFIG:Debug>:-fno-omit-frame-pointer>
+        $<$<CONFIG:Debug>:-fvar-tracking>
+        $<$<CONFIG:Debug>:-fvar-tracking-assignments>
+        $<$<CONFIG:Debug>:-fno-inline>
+        $<$<CONFIG:Debug>:-fno-inline-functions>
+)
+
+add_library(quark_release_options INTERFACE)
+
+target_compile_options(quark_release_options INTERFACE
+        $<$<CONFIG:Release>:-O3>
+)
+
+# Kernel options
 add_library(quark_kernel_options INTERFACE)
-target_link_libraries(quark_kernel_options INTERFACE quark_freestanding_options)
+
+target_link_libraries(quark_kernel_options INTERFACE
+        quark_freestanding_options
+        quark_debug_options
+        quark_release_options
+)
+
 target_compile_options(quark_kernel_options INTERFACE
         -mcmodel=kernel
         -Wall
         -Wextra
-        $<$<CONFIG:Debug>:-g>
-        $<$<CONFIG:Debug>:-O0>
-        $<$<CONFIG:Release>:-O3>
 )
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 
+# Userspace options
 add_library(quark_userspace_options INTERFACE)
-target_link_libraries(quark_userspace_options INTERFACE quark_freestanding_options)
+
+target_link_libraries(quark_userspace_options INTERFACE
+        quark_freestanding_options
+        quark_debug_options
+        quark_release_options
+)
+
 target_compile_options(quark_userspace_options INTERFACE
         -mcmodel=small
-        $<$<CONFIG:Debug>:-g>
-        $<$<CONFIG:Debug>:-O0>
-        $<$<CONFIG:Release>:-O3>
+        --sysroot=${QUARK_SYSROOT}
 )
+
 target_link_options(quark_userspace_options INTERFACE
-        -nostdlib
-        -static
+        --sysroot=${QUARK_SYSROOT}
         -no-pie
-        -Wl,-T,${CMAKE_SOURCE_DIR}/user/linker.ld
 )
-# Userspace executables build with -nostdlib and their own entry point, so
-# GCC's crtbegin.o/crtend.o (which would normally define __dso_handle) are
-# never linked in. Provide it centrally here so every target that links
-# quark_userspace_options gets it, instead of duplicating it per program.
-# TODO: Figure out if this is actually needed
-target_sources(quark_userspace_options INTERFACE ${CMAKE_SOURCE_DIR}/user/crt/dso_handle.cpp)
 
-set(TOOLCHAIN_PREFIX ${CMAKE_BINARY_DIR}/toolchain)
-set(QUARK_SYSROOT ${CMAKE_BINARY_DIR}/sysroot CACHE PATH "Quark sysroot root")
-set(CMAKE_INSTALL_PREFIX ${QUARK_SYSROOT} CACHE PATH "" FORCE)
-
-set(GCC_VERSION 15.3.0)
+# LTO
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 
 include(ExternalProject)
 
-include(toolchain/headers.cmake)   # defines mlibc_headers, target now exists in this scope
-add_subdirectory(libc)             # mlibc_build can DEPENDS gcc_build
-add_subdirectory(toolchain)        # gcc_build can DEPENDS mlibc_headers, target already known
-
-# mlibc_build and gcc_bootstrap each need to reference the other's target name
-# (mlibc_build needs the bootstrap compiler binary; gcc_final needs mlibc's
-# libc.a)
-add_dependencies(mlibc_build gcc_bootstrap)
-
+add_subdirectory(libc)
 add_subdirectory(kernel)
 add_subdirectory(user/init)
 add_subdirectory(user/snell)
 
-find_program(XORRISO NAMES xorriso)
-if (NOT XORRISO)
-    message(FATAL_ERROR "xorriso not found")
-endif ()
-
-find_program(QEMU_SYSTEM_X86_64 NAMES qemu-system-x86_64)
-if (NOT QEMU_SYSTEM_X86_64)
-    message(FATAL_ERROR "qemu-system-x86_64 not found")
-endif ()
-
-set(ISO_DIR ${CMAKE_BINARY_DIR}/iso)
-set(ISO_OUTPUT ${CMAKE_BINARY_DIR}/quark.iso)
-set(LIMINE_SRC_DIR ${CMAKE_SOURCE_DIR}/external/limine)
-set(LIMINE_DIR ${ISO_DIR}/boot/limine)
-set(QEMU_COMMON_ARGS
-        -cdrom ${ISO_OUTPUT}
-        -net none
-        -serial mon:stdio
-        -m 4G
-        -audiodev pa,id=speaker
-        -machine pcspk-audiodev=speaker
-        -no-reboot
-        -no-shutdown
-        -smbios type=0,vendor=hog_vendor,version=1.2.3
-        -smbios type=3,version=te
-)
-
+find_program(XORRISO NAMES xorriso REQUIRED)
+find_program(QEMU_SYSTEM_X86_64 NAMES qemu-system-x86_64 REQUIRED)
 find_program(DD_TOOL NAMES dd REQUIRED)
 find_program(MFORMAT_TOOL NAMES mformat REQUIRED)
 find_program(MCOPY_TOOL NAMES mcopy REQUIRED)
-find_program(MMD_TOOL NAMES mmd REQUIRED)
 
-set(QUARK_IMG ${CMAKE_CURRENT_BINARY_DIR}/quark.img)
+set(ISO_DIR ${CMAKE_BINARY_DIR}/iso)
+set(ISO_OUTPUT ${CMAKE_BINARY_DIR}/quark.iso)
 
+set(LIMINE_SRC_DIR ${CMAKE_SOURCE_DIR}/external/limine)
+set(LIMINE_DIR ${ISO_DIR}/boot/limine)
+set(EFI_DIR ${ISO_DIR}/EFI/BOOT)
+
+set(QUARK_IMG ${CMAKE_BINARY_DIR}/quark.img)
+
+# Disk image
 add_custom_command(
         OUTPUT ${QUARK_IMG}
         COMMAND ${DD_TOOL} if=/dev/zero of=${QUARK_IMG} bs=1M count=64 status=none
@@ -123,8 +126,10 @@ add_custom_command(
         COMMENT "Creating FAT32 disk image"
         VERBATIM
 )
+
 add_custom_target(quark_img DEPENDS ${QUARK_IMG})
 
+# Install into sysroot
 add_custom_target(quark_sysroot_install
         COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG>
         DEPENDS ${KERNEL_TARGET} init snell quark_libc
@@ -132,6 +137,7 @@ add_custom_target(quark_sysroot_install
         VERBATIM
 )
 
+# ISO
 add_custom_target(quark_iso
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${ISO_DIR}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${LIMINE_DIR}
@@ -158,4 +164,5 @@ add_custom_target(quark_iso
         COMMENT "Creating bootable ISO"
         VERBATIM
 )
+
 add_dependencies(quark_iso quark_sysroot_install quark_img)

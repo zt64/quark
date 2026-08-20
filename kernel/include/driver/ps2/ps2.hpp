@@ -1,4 +1,5 @@
 #pragma once
+
 #include <cstdint>
 
 constexpr uint8_t PS2_DATA_PORT = 0x60;

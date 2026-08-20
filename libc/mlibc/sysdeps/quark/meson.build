@@ -76,9 +76,7 @@ if not no_headers
 		follow_symlinks: true
 	)
 endif
-# ANCHOR_END: abi-includes
 
-# ANCHOR: crt1
 if not headers_only
 	crt = custom_target('crt1',
 		build_by_default: true,
@@ -89,4 +87,3 @@ if not headers_only
 		install_dir: get_option('libdir')
 	)
 endif
-# ANCHOR_END: crt1

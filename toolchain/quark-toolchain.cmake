@@ -1,4 +1,4 @@
-set(CMAKE_SYSTEM_NAME quark)
+set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
 
 set(QUARK_TOOLCHAIN_BIN "$ENV{HOME}/opt/cross/bin")

@@ -10,6 +10,7 @@ include(ExternalProject)
 # Repository root
 get_filename_component(QUARK_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
+set(GCC_VERSION "15.3.0" CACHE STRING "GCC version") # Injected into quark-cross.ini.in
 set(QUARK_TARGET x86_64-quark)
 
 # Install locations

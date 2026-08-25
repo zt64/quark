@@ -5,117 +5,123 @@
 #include <lib/mem.hpp>
 #include <lib/string.hpp>
 
-// bios parameter block
-struct bpb {
-    uint8_t unk[3];
-    char oem_identifier[8];
-    uint16_t bytes_per_sector;
-    uint8_t sectors_per_cluster;
-    uint16_t reserved_sectors;
-    uint8_t fats;
-    uint16_t root_entries;
-    uint16_t sectors;
-    uint8_t media_descriptor_type;
-    uint16_t table_size_16; // FAT12/FAT16 only!!
-    uint16_t sectors_per_track;
-    uint16_t heads;
-    uint32_t hidden_sectors;
-    uint32_t large_sector_count;
-} __attribute__((packed));
-
-// extended boot record
-struct ebr_32 {
-    uint32_t sectors_per_fat;
-    uint16_t flags;
-    uint16_t fat_version;
-    uint32_t root_cluster;
-    uint16_t fsinfo_sector;
-    uint16_t backup_sector;
-    uint8_t reserved[12];
-    uint8_t drive_number;
-    uint8_t nt_flags; // Windows NT flags, not used in Quark
-    uint8_t signature;
-    uint32_t volume_serial_number;
-    char volume_label[11];
-    char system_identifier[8];
-    uint8_t boot_code[420];
-    uint16_t boot_signature;
-} __attribute__((packed));
-
-struct fs_info_t {
-    uint32_t lead_signature;
-    uint8_t reserved[480];
-    uint32_t signature;
-    uint32_t free_clusters;
-    uint32_t cluster_number_start;
-    uint8_t reserved2[12];
-    uint32_t trail_signature;
-} __attribute__((packed));
-
-struct date {
-};
-
-struct time {
-};
-
-struct long_file_name {
-    uint8_t order;
-    char16_t name_1[5];
-    uint8_t attr;
-    uint8_t type;
-    uint8_t checksum;
-    char16_t name_2[6];
-    uint16_t first_cluster;
-    char16_t name_3[2];
-} __attribute__((packed));;
-
-enum attribute : uint8_t {
-    READ_ONLY = 0x01,
-    HIDDEN = 0x02,
-    SYSTEM = 0x04,
-    VOLUME_ID = 0x08,
-    DIRECTORY = 0x10,
-    ARCHIVE = 0x20
-};
-
-struct dir_entry {
-    char name[11];
-    attribute attr;
-    uint8_t reserved;
-    uint8_t creation_time_hundreds;
-    uint16_t creation_time;
-    uint16_t creation_date;
-    uint16_t access_date;
-    uint16_t cluster_num_high;
-    uint16_t modification_time;
-    uint16_t modification_date;
-    uint16_t cluster_num_low;
-    uint32_t size;
-} __attribute__((packed));
-
-enum fat_type {
-    ExFAT,
-    FAT12,
-    FAT16,
-    FAT32
-};
-
 namespace fat32 {
     constexpr uint32_t EOF_MARKER = 0x0FFFFFF8;
 
-    struct fat32_volume {
-        const void* module_addr;
-        uint32_t first_fat_sector;
-        uint16_t bytes_per_sector;
-        uint32_t entries_per_cluster;
-        uint32_t sectors_per_cluster;
-        uint32_t first_data_sector;
-        uint32_t root_cluster;
-    };
+    namespace {
+        // bios parameter block
+        struct bpb {
+            uint8_t unk[3];
+            char oem_identifier[8];
+            uint16_t bytes_per_sector;
+            uint8_t sectors_per_cluster;
+            uint16_t reserved_sectors;
+            uint8_t fats;
+            uint16_t root_entries;
+            uint16_t sectors;
+            uint8_t media_descriptor_type;
+            uint16_t table_size_16; // FAT12/FAT16 only!!
+            uint16_t sectors_per_track;
+            uint16_t heads;
+            uint32_t hidden_sectors;
+            uint32_t large_sector_count;
+        } __attribute__((packed));
+
+        // extended boot record
+        struct ebr_32 {
+            uint32_t sectors_per_fat;
+            uint16_t flags;
+            uint16_t fat_version;
+            uint32_t root_cluster;
+            uint16_t fsinfo_sector;
+            uint16_t backup_sector;
+            uint8_t reserved[12];
+            uint8_t drive_number;
+            uint8_t nt_flags; // Windows NT flags, not used in Quark
+            uint8_t signature;
+            uint32_t volume_serial_number;
+            char volume_label[11];
+            char system_identifier[8];
+            uint8_t boot_code[420];
+            uint16_t boot_signature;
+        } __attribute__((packed));
+
+        struct fs_info_t {
+            uint32_t lead_signature;
+            uint8_t reserved[480];
+            uint32_t signature;
+            uint32_t free_clusters;
+            uint32_t cluster_number_start;
+            uint8_t reserved2[12];
+            uint32_t trail_signature;
+        } __attribute__((packed));
+
+        struct date {
+        };
+
+        struct time {
+        };
+
+        struct long_file_name {
+            uint8_t order;
+            char16_t name_1[5];
+            uint8_t attr;
+            uint8_t type;
+            uint8_t checksum;
+            char16_t name_2[6];
+            uint16_t first_cluster;
+            char16_t name_3[2];
+        } __attribute__((packed));;
+
+        static_assert(sizeof(long_file_name) == 32);
+
+        enum attribute : uint8_t {
+            READ_ONLY = 0x01,
+            HIDDEN = 0x02,
+            SYSTEM = 0x04,
+            VOLUME_ID = 0x08,
+            DIRECTORY = 0x10,
+            ARCHIVE = 0x20
+        };
+
+        struct dir_entry {
+            char name[11];
+            attribute attr;
+            uint8_t reserved;
+            uint8_t creation_time_hundreds;
+            uint16_t creation_time;
+            uint16_t creation_date;
+            uint16_t access_date;
+            uint16_t cluster_num_high;
+            uint16_t modification_time;
+            uint16_t modification_date;
+            uint16_t cluster_num_low;
+            uint32_t size;
+        } __attribute__((packed));
+
+        static_assert(sizeof(dir_entry) == 32);
+
+        enum fat_type {
+            ExFAT,
+            FAT12,
+            FAT16,
+            FAT32
+        };
+
+        struct fat32_volume {
+            const void* module_addr;
+            uint32_t first_fat_sector;
+            uint16_t bytes_per_sector;
+            uint32_t entries_per_cluster;
+            uint32_t sectors_per_cluster;
+            uint32_t first_data_sector;
+            uint32_t root_cluster;
+        };
+    }
 
     fat32_volume volume;
 
-    inline uint32_t calculate_lba(const fat32_volume& volume, const uint32_t cluster) {
+    static uint32_t calculate_lba(const fat32_volume& volume, const uint32_t cluster) {
         return ((cluster - 2) * volume.sectors_per_cluster) +
             volume.first_data_sector;
     }
@@ -170,9 +176,9 @@ namespace fat32 {
                         memcpy(&chunk[5], lfn->name_2, 6 * sizeof(char16_t));
                         memcpy(&chunk[11], lfn->name_3, 2 * sizeof(char16_t));
 
-                        for (int c = 0; c < 13; c++) {
-                            if (chunk[c] == 0x0000 || chunk[c] == 0xFFFF) break;
-                            name[name_len++] = static_cast<char>(chunk[c] & 0xFF);
+                        for (const char16_t c : chunk) {
+                            if (c == 0x0000 || c == 0xFFFF) break;
+                            name[name_len++] = static_cast<char>(c & 0xFF);
                         }
 
                         k--;
@@ -231,8 +237,6 @@ namespace fat32 {
     bool resolve_path(const char* path, vfs::dir_entry& result) {
         uint32_t cluster = volume.root_cluster;
 
-        logger.debug("Resolving path: %s", path);
-
         if (strcmp(path, "/") != 0) {
             // walk each path component
             char component[256];
@@ -254,13 +258,11 @@ namespace fat32 {
             result.inode = volume.root_cluster;
         }
 
-        logger.debug("Resolved path '%s' to cluster %u", path, cluster);
-
         return true;
     }
 
     size_t stat(const char* path, vfs::stat_t* result) {
-        vfs::dir_entry entry;
+        vfs::dir_entry entry{};
 
         if (!resolve_path(path, entry)) return 0;
 
@@ -270,13 +272,24 @@ namespace fat32 {
         return sizeof(vfs::stat_t);
     }
 
+    size_t open(const char* path, uint32_t flags) {
+        vfs::dir_entry entry{};
+
+        if (!resolve_path(path, entry)) return 0;
+
+        // TODO: Create descriptor and return it
+    }
+
+    size_t close(const char* path) {
+    }
+
     size_t read(const char* path, uint8_t* buffer, const uint32_t max_size) {
-        vfs::dir_entry entry;
+        vfs::dir_entry entry{};
 
         if (!resolve_path(path, entry))
             return 0;
 
-        uint32_t cluster = static_cast<uint32_t>(entry.inode);
+        auto cluster = static_cast<uint32_t>(entry.inode);
         size_t bytes_read = 0;
 
         const size_t file_size = entry.size;
@@ -319,14 +332,13 @@ namespace fat32 {
             const char* p = path;
 
             while (next_component(&p, component)) {
-                vfs::dir_entry entry;
+                vfs::dir_entry entry{};
 
                 if (!lookup(cluster, component, entry)) {
                     return 0;
                 }
 
-                if (entry.type != vfs::file_type::Directory)
-                    return 0;
+                if (entry.type != vfs::file_type::Directory) return 0;
 
                 cluster = static_cast<uint32_t>(entry.inode);
             }
@@ -337,11 +349,10 @@ namespace fat32 {
 
     bool lookup(const uint32_t directory_cluster, const char* name, vfs::dir_entry& result) {
         vfs::dir_entry entries[64];
-        logger.debug("Looking for '%s' in cluster %u", name, directory_cluster);
+
         const size_t count = read_directory(directory_cluster, entries, sizeof(entries) / sizeof(vfs::dir_entry));
 
         for (size_t i = 0; i < count; i++) {
-            logger.debug("Comparing: '%s' with '%s'", entries[i].name, name);
             if (strcmp(entries[i].name, name) == 0) {
                 result = entries[i];
                 return true;
@@ -353,11 +364,9 @@ namespace fat32 {
 
     void init(const void* module_addr) {
         const auto* fat_boot = static_cast<const bpb*>(module_addr);
-        const auto* ext = reinterpret_cast<const ebr_32*>(static_cast<const uint8_t*>(module_addr) + sizeof(
-            bpb));
-        const auto* fs_info = reinterpret_cast<const fs_info_t*>(static_cast<const uint8_t*>(module_addr) + sizeof
-            (bpb) +
-            sizeof(ebr_32));
+        const auto* ext = reinterpret_cast<const ebr_32*>(static_cast<const uint8_t*>(module_addr) + sizeof(bpb));
+        const auto* fs_info = reinterpret_cast<const fs_info_t*>(static_cast<const uint8_t*>(module_addr) +
+            sizeof(bpb) + sizeof(ebr_32));
 
         if (fs_info->lead_signature != 0x41615252) {
             logger.warn("Unexpected lead signature in FS Info: 0x%X", fs_info->lead_signature);
@@ -371,8 +380,8 @@ namespace fat32 {
             logger.warn("Unexpected trail signature in FS Info: 0x%X", fs_info->trail_signature);
         }
 
-        const uint32_t root_dir_sectors = ((fat_boot->root_entries * 32) + (fat_boot->bytes_per_sector - 1)) / fat_boot
-            ->bytes_per_sector;
+        const uint32_t root_dir_sectors = ((fat_boot->root_entries * 32) + (fat_boot->bytes_per_sector - 1)) /
+            fat_boot->bytes_per_sector;
 
         const uint32_t total_sectors = fat_boot->sectors != 0 ? fat_boot->sectors : fat_boot->large_sector_count;
         const uint32_t fat_size = ext->sectors_per_fat; // FAT32 always uses this; table_size_16 is always 0 here
@@ -402,8 +411,7 @@ namespace fat32 {
 
         volume.module_addr = module_addr;
         volume.bytes_per_sector = fat_boot->bytes_per_sector;
-        volume.entries_per_cluster = (fat_boot->bytes_per_sector * fat_boot->sectors_per_cluster) / sizeof(
-            dir_entry);
+        volume.entries_per_cluster = (fat_boot->bytes_per_sector * fat_boot->sectors_per_cluster) / sizeof(dir_entry);
         volume.sectors_per_cluster = fat_boot->sectors_per_cluster;
         volume.first_data_sector = first_data_sector;
         volume.first_fat_sector = first_fat_sector;

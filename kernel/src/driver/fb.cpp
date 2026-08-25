@@ -155,10 +155,10 @@ namespace screen {
     }
 
     void clear() {
-        memset_fast(vga_buffer, 0, framebuffer.size);
+        memset(vga_buffer, 0, framebuffer.size);
     }
 
     void flush() {
-        memcpy_fast(framebuffer.addr, vga_buffer, framebuffer.size);
+        memcpy(framebuffer.addr, vga_buffer, framebuffer.size);
     }
 }

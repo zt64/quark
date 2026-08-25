@@ -1,4 +1,7 @@
 #include "kernel/exception.hpp"
+
+#include <kernel/process.hpp>
+
 #include "kernel/log.hpp"
 #include "kernel/system.hpp"
 
@@ -34,8 +37,8 @@ extern "C" [[noreturn]] void fault_handler(const regs* r) {
     if (r->cs & 0x11) {
         logger.fatal("Faulting address is in user space. Terminating offending process.");
 
-        asm volatile("cli; hlt");
-        for (;;) {}
+        // TODO: Send signal to task
+        terminate_task(current);
     } else {
         logger.fatal("Faulting address is in kernel space. Halting.");
         asm volatile("cli; hlt");

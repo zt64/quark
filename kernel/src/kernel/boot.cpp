@@ -17,6 +17,7 @@ namespace boot {
 
         const limine_framebuffer_response* framebuffer_response =
             limine_requests::framebuffer_request.response;
+
         if (!framebuffer_response || framebuffer_response->framebuffer_count == 0) {
             panic("No framebuffer provided");
         }

@@ -12,12 +12,10 @@ ld = '@TOOLCHAIN_PREFIX@/bin/x86_64-quark-ld'
 # for these: that snapshot is pinned to headers generated from a specific
 # upstream GCC version and is not guaranteed to match this toolchain's GCC
 # (verified: it references target attributes GCC 15.x removed).
-c_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone',
-           '-mno-avx', '-mno-avx2', '-mno-avx512f',
+c_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small',
            '-idirafter', '@QUARK_SYSROOT@/usr/include',
            '-idirafter', '@TOOLCHAIN_PREFIX@/lib/gcc/x86_64-quark/@GCC_VERSION@/include']
-cpp_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small', '-ffreestanding', '-mno-red-zone',
-           '-mno-avx', '-mno-avx2', '-mno-avx512f',
+cpp_args = ['--sysroot=@QUARK_SYSROOT@', '-mcmodel=small',
            '-idirafter', '@QUARK_SYSROOT@/usr/include',
            '-idirafter', '@TOOLCHAIN_PREFIX@/lib/gcc/x86_64-quark/@GCC_VERSION@/include']
 

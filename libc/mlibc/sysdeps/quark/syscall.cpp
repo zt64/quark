@@ -1,7 +1,7 @@
 #include <bits/syscall.h>
 #include <errno.h>
 
-extern "C" long __do_syscall_ret(unsigned long ret) {
+extern "C" long __do_syscall_ret(const unsigned long ret) {
     if (static_cast<long>(ret) < 0) {
         errno = static_cast<int>(-ret);
         return -1;

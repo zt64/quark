@@ -43,7 +43,9 @@ namespace vfs {
 
     size_t stat(const char* path, stat_t* buffer);
     uint32_t open(const char* path, uint32_t flags);
+    size_t opendir(const char* path);
     size_t read(const char* path, uint8_t* buffer, uint32_t size);
     size_t readdir(const char* path, dir_entry* entries, uint32_t max_entries);
-    void close (uint32_t handle);
+    size_t close(size_t handle);
+    size_t closedir(size_t handle);
 }

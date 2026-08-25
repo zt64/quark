@@ -102,6 +102,12 @@ ExternalProject_Add(gcc_bootstrap
 #
 # mlibc
 #
+
+file(GLOB_RECURSE QUARK_SYSDEPS_SOURCES
+        "${QUARK_ROOT}/libc/mlibc/sysdeps/quark/*.cpp"
+        "${QUARK_ROOT}/libc/mlibc/sysdeps/quark/*.hpp"
+)
+
 ExternalProject_Add(mlibc_build
         SOURCE_DIR "${QUARK_ROOT}/libc/mlibc"
         DEPENDS mlibc_headers gcc_bootstrap
@@ -113,6 +119,7 @@ ExternalProject_Add(mlibc_build
         BUILD_COMMAND ${NINJA_EXE} -C <BINARY_DIR>
         INSTALL_COMMAND ${CMAKE_COMMAND} -E env DESTDIR=${QUARK_SYSROOT} ${NINJA_EXE} -C <BINARY_DIR> install
         BUILD_BYPRODUCTS ${QUARK_SYSROOT}/usr/lib/libc.a
+        BUILD_ALWAYS TRUE
 )
 
 #
@@ -134,6 +141,7 @@ ExternalProject_Add(gcc_final
         --enable-languages=c,c++
         --disable-multilib
         --disable-nls
+        --enable-threads=posix
         --enable-shared
         --enable-host-shared
         BUILD_COMMAND ${CMAKE_COMMAND} -E env PATH=${TOOLCHAIN_PREFIX}/bin:$ENV{PATH} sh -c "make all-gcc all-target-libgcc all-target-libstdc++-v3 -j14"

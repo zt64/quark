@@ -3,7 +3,6 @@
 #include "kernel/log.hpp"
 #include "lib/stdlib.hpp"
 #include "lib/string.hpp"
-#include "memory/pmm.hpp"
 
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr* out_rsdp_address) {
     if (!out_rsdp_address) return UACPI_STATUS_INVALID_ARGUMENT;

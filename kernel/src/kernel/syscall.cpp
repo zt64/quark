@@ -1,31 +1,52 @@
 #include "kernel/syscall.hpp"
-
 #include "kernel/system.hpp"
 #include <cstddef>
 #include <lib/mem.hpp>
 #include <driver/fb.hpp>
 #include <driver/timer.hpp>
+#include <driver/fs/vfs.hpp>
 #include <kernel/log.hpp>
 #include <kernel/process.hpp>
 #include <kernel/scheduler.hpp>
 #include <kernel/userspace.hpp>
+#include <lib/printf.h>
 #include <memory/paging.hpp>
 #include <memory/pmm.hpp>
 #include <memory/vmm.hpp>
 #include "arch/msr.hpp"
 #include "kernel/stdio.hpp"
 
+// Must match the SYS_* defines in libc/mlibc/sysdeps/quark/sysdeps.cpp.
+#define SYS_READ 0
+#define SYS_WRITE 1
+#define SYS_OPEN 2
+#define SYS_CLOSE 3
+#define SYS_MMAP 4
+#define SYS_MUNMAP 5
+#define SYS_EXEC 6
+#define SYS_FORK 7
+#define SYS_GETPID 8
+#define SYS_SLEEP 9
+#define SYS_EXIT 10
+#define SYS_SET_FS_BASE 11
+#define SYS_OPENDIR 12
+#define SYS_READDIR 13
+#define SYS_CLOSEDIR 14
+#define SYS_WAITPID 15
+#define SYS_COUNT 16
+
+// ---- syscall implementations (unchanged) ----
+
 static size_t sys_read(const uint32_t fd, void* buf, const size_t count) {
     if (buf == nullptr) {
         return 0;
     }
-
     switch (fd) {
         case 0:
             return stdin_read(buf, count);
         case 1:
             return stdout_read(buf, count);
-        default: // TODO: Handle fd
+        default:
             return 0;
     }
 }
@@ -40,14 +61,19 @@ static size_t sys_write(const uint32_t fd, const void* buf, const size_t count) 
         case 1:
             if (buf && count > 0) {
                 stdout_push(static_cast<const uint8_t*>(buf));
-                logger.debug(static_cast<const char*>(buf), count);
+                printf(static_cast<const char*>(buf));
                 return count;
             }
             break;
+        case 2:
+            if (buf && count > 0) {
+                stdout_push(static_cast<const uint8_t*>(buf));
+                logger.error(static_cast<const char*>(buf), count);
+                return count;
+            }
         default:
             break;
     }
-
     return 0;
 }
 
@@ -66,8 +92,6 @@ static size_t align_up(const size_t v, const size_t align) {
     return (v + (align - 1)) & ~(align - 1);
 }
 
-// fd == 3 is our ad-hoc convention for mapping the framebuffer; anything else (including the
-// standard anonymous-mapping convention of fd == -1) allocates fresh, zeroed physical memory.
 constexpr int MMAP_FD_FRAMEBUFFER = 3;
 
 static void* sys_mmap(
@@ -83,13 +107,13 @@ static void* sys_mmap(
     uintptr_t user_base;
 
     if (addr == nullptr) {
-        user_base = vmm::find_free_addr(length);
+        user_base = vmm::find_free_addr(current->cr3, length);
     } else {
         user_base = reinterpret_cast<uintptr_t>(addr);
     }
 
     if (fd == MMAP_FD_FRAMEBUFFER) {
-        const uintptr_t fb_virt = reinterpret_cast<uintptr_t>(screen::framebuffer.addr);
+        const auto fb_virt = reinterpret_cast<uintptr_t>(screen::framebuffer.addr);
 
         uintptr_t fb_phys;
         if (!paging::translate(fb_virt, fb_phys)) {
@@ -101,7 +125,6 @@ static void* sys_mmap(
         const size_t page_offset = fb_phys & (paging::PAGE_SIZE - 1);
         const size_t map_size = align_up(size + page_offset, paging::PAGE_SIZE);
 
-        // Reserve user virtual space, but map phys_page + offset rather than allocating pages.
         for (size_t map_offset = 0; map_offset < map_size; map_offset += paging::PAGE_SIZE) {
             paging::map_page(
                 current->cr3,
@@ -110,11 +133,11 @@ static void* sys_mmap(
                 paging::PAGE_USER | paging::PAGE_WRITABLE);
         }
 
+        vmm::track(current->cr3, user_base, map_size, VM_FLAG_WRITE | VM_FLAG_USER);
+
         return reinterpret_cast<void*>(user_base + page_offset);
     }
 
-    // Anonymous (or otherwise unsupported) mapping: back it with real, zeroed physical memory
-    // sized to the actual request instead of aliasing the framebuffer.
     const size_t map_size = align_up(length, paging::PAGE_SIZE);
     const size_t page_count = map_size / paging::PAGE_SIZE;
 
@@ -135,6 +158,8 @@ static void* sys_mmap(
         }
     }
 
+    vmm::track(current->cr3, user_base, map_size, VM_FLAG_WRITE | VM_FLAG_USER);
+
     return reinterpret_cast<void*>(user_base);
 }
 
@@ -146,83 +171,15 @@ static size_t sys_munmap(const void* addr, const size_t length, const int prot, 
     return 0;
 }
 
-static size_t sys_exec(const char* path, char* const argv[], char* const envp[]) {
+[[noreturn]] static void sys_exec(const char* path, char* const argv[], char* const envp[]) {
     userspace::launch(path, argv, envp, nullptr);
 }
 
+// TODO: Kernel stack size should be defined in a constant somewhere
+constexpr uint8_t KERNEL_STACK_PAGES = 4;
+
 static size_t sys_fork() {
-    const task* parent = current;
-
-    task* child_task = create_task(parent->module_addr);
-
-    child_task->parent = const_cast<task*>(parent);
-
-    for (uintptr_t offset = 0; offset < parent->stack_size; offset += paging::PAGE_SIZE) {
-        uintptr_t parent_phys;
-        if (!paging::translate(parent->cr3, parent->stack_base + offset, parent_phys)) {
-            panic("fork: failed to translate parent stack page");
-        }
-
-        uintptr_t child_phys;
-        if (!paging::translate(child_task->cr3, child_task->stack_base + offset, child_phys)) {
-            panic("fork: failed to translate child stack page");
-        }
-
-        const auto* src = reinterpret_cast<const void*>(parent_phys + paging::g_hhdm_offset);
-        auto* dst = reinterpret_cast<void*>(child_phys + paging::g_hhdm_offset);
-        memcpy(dst, src, paging::PAGE_SIZE);
-    }
-    constexpr uintptr_t KERNEL_STACK_SIZE = 4 * paging::PAGE_SIZE;
-
-    const uintptr_t parent_kernel_base =
-        reinterpret_cast<uintptr_t>(parent->rsp0) - KERNEL_STACK_SIZE;
-
-    const uintptr_t child_kernel_base =
-        reinterpret_cast<uintptr_t>(child_task->rsp0) - KERNEL_STACK_SIZE;
-
-    for (uintptr_t offset = 0; offset < KERNEL_STACK_SIZE; offset += paging::PAGE_SIZE) {
-        uintptr_t parent_phys;
-        if (!paging::translate(parent->cr3, parent_kernel_base + offset, parent_phys)) {
-            panic("fork: failed to translate parent kernel stack page");
-        }
-
-        uintptr_t child_phys;
-        if (!paging::translate(child_task->cr3, child_kernel_base + offset, child_phys)) {
-            panic("fork: failed to translate child kernel stack page");
-        }
-
-        memcpy(
-            reinterpret_cast<void*>(child_phys + paging::g_hhdm_offset),
-            reinterpret_cast<const void*>(parent_phys + paging::g_hhdm_offset),
-            paging::PAGE_SIZE
-        );
-    }
-
-    // Rebase scheduler context.
-    const uintptr_t rsp_offset =
-        reinterpret_cast<uintptr_t>(parent->rsp) - parent_kernel_base;
-
-    child_task->rsp =
-        reinterpret_cast<void*>(child_kernel_base + rsp_offset);
-
-    // Rebase trap frame.
-    const uintptr_t trap_offset =
-        reinterpret_cast<uintptr_t>(parent->trap_frame) - parent_kernel_base;
-
-    child_task->trap_frame =
-        reinterpret_cast<regs*>(child_kernel_base + trap_offset);
-
-    // Child returns 0 from fork().
-    process::write_kernel_qword(
-        child_task->cr3,
-        reinterpret_cast<uintptr_t>(child_task->trap_frame) + offsetof(regs, rax),
-        0
-    );
-    current->next = child_task;
-    child_task->next = const_cast<task*>(parent);
-    scheduler::reschedule();
-    logger.debug("forked new task with pid: %d", child_task->pid);
-    return child_task->pid;
+    panic("sys_fork is not implemented cause i am too incompetant to figure out how");
 }
 
 static size_t sys_getpid() {
@@ -237,75 +194,181 @@ static size_t sys_sleep(const uint32_t milliseconds) {
 }
 
 [[noreturn]] static void sys_exit(const int status) {
-    // TODO: proper task teardown (unlink from scheduler list, free address space/resources).
-    panic("Task pid=%u exited with status %d (task termination is not yet implemented)", current->pid, status);
+    task* t = current;
+    t->state = ZOMBIE;
+
+    logger.debug("Task pid=%d exited with status %d", t->pid, status);
+
+    task* it = t->next;
+    while (it != t && it->next != t) {
+        it = it->next;
+    }
+    if (it != t) {
+        it->next = t->next;
+    }
+
+    scheduler::block_current(nullptr);
+    __builtin_unreachable();
 }
 
 constexpr uint32_t IA32_FS_BASE = 0xC0000100;
 
 static size_t sys_set_fs_base(const uint64_t base) {
-    // Sets the current task's %fs segment base, used by mlibc/rtld for TLS (thread pointer).
-    // Persisted on the task struct so it is restored by switch_to_task() on every context switch.
     current->fs_base = base;
-    const uint32_t lo = static_cast<uint32_t>(base);
-    const uint32_t hi = static_cast<uint32_t>(base >> 32);
+    const auto lo = static_cast<uint32_t>(base);
+    const auto hi = static_cast<uint32_t>(base >> 32);
     arch::cpu_set_msr(IA32_FS_BASE, lo, hi);
     return 0;
 }
 
+static size_t sys_opendir(const char* path, int* handle) {
+    (void)handle;
+
+    vfs::opendir(path);
+
+    return static_cast<size_t>(-1);
+}
+
+static size_t sys_readdir(const int handle, void* dirent_buf) {
+    (void)handle;
+    (void)dirent_buf;
+    return static_cast<size_t>(-1);
+}
+
+static size_t sys_closedir(const int handle) {
+    return vfs::closedir(handle);
+}
+
+static size_t sys_waitpid(const int pid, int* status, const int options, void* ru, void* ret_pid) {
+    (void)status;
+    (void)options;
+    (void)ru;
+    (void)ret_pid;
+
+    scheduler::block_current(reinterpret_cast<const void*>(pid));
+
+    return static_cast<size_t>(-1);
+}
+
+static uint64_t handle_read(const regs* r) {
+    return sys_read(r->rbx, reinterpret_cast<void*>(r->rcx), r->rdx);
+}
+
+static uint64_t handle_write(const regs* r) {
+    return sys_write(r->rbx, reinterpret_cast<const void*>(r->rcx), r->rdx);
+}
+
+static uint64_t handle_open(const regs* r) {
+    return sys_open(r->rbx, r->rcx);
+}
+
+static uint64_t handle_close(const regs* r) {
+    return sys_close(r->rbx);
+}
+
+static uint64_t handle_mmap(const regs* r) {
+    return reinterpret_cast<uint64_t>(
+        sys_mmap(reinterpret_cast<void*>(r->rbx), r->rcx, r->rdx, r->rsi, r->rdi)
+    );
+}
+
+static uint64_t handle_munmap(const regs* r) {
+    return sys_munmap(reinterpret_cast<void*>(r->rbx), r->rcx, r->rdx, r->rsi);
+}
+
+static uint64_t handle_exec(const regs* r) {
+    sys_exec(
+        reinterpret_cast<const char*>(r->rbx),
+        reinterpret_cast<char* const*>(r->rcx),
+        reinterpret_cast<char* const*>(r->rdx)
+    );
+    __builtin_unreachable();
+}
+
+static uint64_t handle_fork(const regs*) {
+    return sys_fork();
+}
+
+static uint64_t handle_getpid(const regs*) {
+    return sys_getpid();
+}
+
+static uint64_t handle_sleep(const regs* r) {
+    return sys_sleep(r->rbx);
+}
+
+static uint64_t handle_exit(const regs* r) {
+    sys_exit(static_cast<int>(r->rbx));
+    __builtin_unreachable();
+}
+
+static uint64_t handle_set_fs_base(const regs* r) {
+    return sys_set_fs_base(r->rbx);
+}
+
+static uint64_t handle_opendir(const regs* r) {
+    return sys_opendir(
+        reinterpret_cast<const char*>(r->rbx),
+        reinterpret_cast<int*>(r->rcx)
+    );
+}
+
+static uint64_t handle_readdir(const regs* r) {
+    return sys_readdir(
+        static_cast<int>(r->rbx),
+        reinterpret_cast<void*>(r->rcx)
+    );
+}
+
+static uint64_t handle_closedir(const regs* r) {
+    return sys_closedir(static_cast<int>(r->rbx));
+}
+
+static uint64_t handle_waitpid(const regs* r) {
+    return sys_waitpid(
+        static_cast<int>(r->rbx),
+        reinterpret_cast<int*>(r->rcx),
+        static_cast<int>(r->rdx),
+        reinterpret_cast<void*>(r->rsi),
+        reinterpret_cast<void*>(r->rdi)
+    );
+}
+// ---- dispatch table ----
+
+using syscall_fn = uint64_t(*)(const regs*);
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-designator"
+static constexpr syscall_fn syscall_table[SYS_COUNT] = {
+    [SYS_READ] = handle_read,
+    [SYS_WRITE] = handle_write,
+    [SYS_OPEN] = handle_open,
+    [SYS_CLOSE] = handle_close,
+    [SYS_MMAP] = handle_mmap,
+    [SYS_MUNMAP] = handle_munmap,
+    [SYS_EXEC] = handle_exec,
+    [SYS_FORK] = handle_fork,
+    [SYS_GETPID] = handle_getpid,
+    [SYS_SLEEP] = handle_sleep,
+    [SYS_EXIT] = handle_exit,
+    [SYS_SET_FS_BASE] = handle_set_fs_base,
+    [SYS_OPENDIR] = handle_opendir,
+    [SYS_READDIR] = handle_readdir,
+    [SYS_CLOSEDIR] = handle_closedir,
+    [SYS_WAITPID] = handle_waitpid
+};
+#pragma clang diagnostic pop
+
 extern "C" void handle_syscall(regs* r) {
-    const uint32_t syscall_number = r->rax;
+    logger.debug("handle_syscall: pid=%d syscall=%lu rbx=0x%lx rcx=0x%lx rdx=0x%lx rsi=0x%lx rdi=0x%lx",
+        current->pid, r->rax, r->rbx, r->rcx, r->rdx, r->rsi, r->rdi);
 
-    logger.debug("handle_syscall: syscall_number=%u, rbx=0x%lx, rcx=0x%lx, rdx=0x%lx, rsi=0x%lx, rdi=0x%lx",
-        syscall_number, r->rbx, r->rcx, r->rdx, r->rsi, r->rdi);
+    const uint32_t n = r->rax;
 
-    switch (syscall_number) {
-        case 0:
-            r->rax = sys_read(r->rbx, reinterpret_cast<void*>(r->rcx), r->rdx);
-            break;
-        case 1:
-            r->rax = sys_write(r->rbx, reinterpret_cast<const void*>(r->rcx), r->rdx);
-            break;
-        case 2:
-            r->rax = sys_open(r->rbx, r->rcx);
-            break;
-        case 3:
-            //close
-            r->rax = sys_close(r->rbx);
-            break;
-        case 4:
-            r->rax = reinterpret_cast<uint64_t>(
-                sys_mmap(reinterpret_cast<void*>(r->rbx), r->rcx, r->rdx, r->rsi, r->rdi)
-            );
-            break;
-        case 5:
-            r->rax = sys_munmap(reinterpret_cast<void*>(r->rbx), r->rcx, r->rdx, r->rsi);
-            break;
-        case 6:
-            r->rax = sys_exec(
-                reinterpret_cast<const char*>(r->rbx),
-                reinterpret_cast<char* const*>(r->rcx),
-                reinterpret_cast<char* const*>(r->rdx)
-            );
-            break;
-        case 7:
-            r->rax = sys_fork();
-            break;
-        case 8:
-            r->rax = sys_getpid();
-            break;
-        case 9:
-            r->rax = sys_sleep(r->rbx);
-            break;
-        case 10:
-            sys_exit(static_cast<int>(r->rbx));
-            break;
-        case 11:
-            r->rax = sys_set_fs_base(r->rbx);
-            logger.debug("handle_syscall: set_fs_base to 0x%lx", r->rbx);
-            break;
-        default:
-            r->rax = static_cast<uint64_t>(-1);
-            break;
+    if (n >= SYS_COUNT || syscall_table[n] == nullptr) {
+        r->rax = static_cast<uint64_t>(-1);
+        return;
     }
+
+    r->rax = syscall_table[n](r);
 }

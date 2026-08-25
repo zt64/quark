@@ -9,8 +9,13 @@ namespace paging {
     namespace {
         constexpr uint64_t page_size_bit = 1ULL << 7;
         // Mask to extract physical address
+        // 4 KiB
         constexpr uint64_t page_frame_mask = 0x000FFFFFFFFFF000ULL;
+
+        // 1 MiB
         constexpr uint64_t large_page_frame_mask = 0x000FFFFFFFE00000ULL;
+
+        // 1 GiB
         constexpr uint64_t huge_page_frame_mask = 0x000FFFFFC0000000ULL;
         constexpr uint64_t large_page_size = 2ULL * 1024 * 1024;
         constexpr uint64_t huge_page_size = 1024ULL * 1024 * 1024;
@@ -126,14 +131,19 @@ namespace paging {
             virt[i] = pml4_table[i];
         }
 
-        for (uint32_t i = 0; i < address_spaces_max; i++) {
-            if (address_spaces[i] == 0) {
-                address_spaces[i] = phys;
+        for (uint64_t & address_space : address_spaces) {
+            if (address_space == 0) {
+                address_space = phys;
                 break;
             }
         }
 
         return phys;
+    }
+
+    size_t free_address_space(const uint64_t cr3) {
+        mem::free_physical_page(reinterpret_cast<void*>(cr3));
+        return 0;
     }
 
     void switch_cr3(const uint64_t cr3) {
@@ -225,6 +235,34 @@ namespace paging {
         asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
         return true;
     }
+
+    bool map_large_page(const uintptr_t cr3, const uintptr_t virt, const uintptr_t phys, const uint64_t flags) {
+        if (cr3 == 0) return false;
+
+        const uint64_t phys_base = cr3 & large_page_frame_mask;
+        uint64_t* root_table = physical_to_virtual(cr3 & large_page_frame_mask);
+
+        auto* pdpt = get_or_create_next_table(root_table[pml4_index(virt)], flags);
+        if (pdpt == nullptr) {
+            logger.error("map_page: failed to get or create PDPT for virt=0x%lx", virt);
+            return false;
+        }
+
+        auto* pd = get_or_create_next_table(pdpt[pdpt_index(virt)], flags);
+        if (pd == nullptr) {
+            logger.error("map_page: failed to get or create PD for virt=0x%lx", virt);
+            return false;
+        }
+        uint64_t& pde = pd[pt_index(virt)];
+        if (is_present(pde)) {
+            return false;
+        }
+
+        pde = phys | PAGE_PRESENT | (flags & (PAGE_WRITABLE | PAGE_USER));
+        asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
+        return true;
+    }
+
 
     bool map_page(const uintptr_t virt, const uintptr_t phys, const uint64_t flags) {
         if (!is_initialized()

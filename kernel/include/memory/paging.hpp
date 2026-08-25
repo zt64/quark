@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace paging {
@@ -30,6 +31,8 @@ namespace paging {
      */
     uint64_t new_address_space();
 
+    size_t free_address_space(uint64_t cr3);
+
     bool is_initialized();
 
     bool translate(uint64_t cr3, uintptr_t virt, uintptr_t& phys);
@@ -46,9 +49,11 @@ namespace paging {
      * @return
      */
     bool map_page(uintptr_t cr3, uintptr_t virt, uintptr_t phys, uint64_t flags);
+    bool map_large_page(uintptr_t cr3, uintptr_t virt, uintptr_t phys, uint64_t flags);
 
     // Map one currently unmapped 4 KiB page in the active address space.
     // The caller supplies page_writable and/or page_user as needed.
+    // TODO: Figure out huge pages 2MiB and 1 GiB
     bool map_page(uintptr_t virt, uintptr_t phys, uint64_t flags);
 
     bool unmap_page(uintptr_t cr3, uintptr_t virt);

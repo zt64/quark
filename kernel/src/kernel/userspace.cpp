@@ -1,18 +1,17 @@
 #include "kernel/userspace.hpp"
 #include <cstddef>
 #include <driver/fs/vfs.hpp>
-#include <kernel/process.hpp>
-#include <lib/stdlib.hpp>
-#include <memory/pmm.hpp>
-#include "lib/string.hpp"
+#include <kernel/scheduler.hpp>
 
 #include "boot/limine/limine_requests.hpp"
-#include "kernel/elf.hpp"
 #include "kernel/log.hpp"
+#include "kernel/process.hpp"
 #include "kernel/system.hpp"
 #include "kernel/tss.hpp"
+#include "lib/mem.hpp"
+#include "lib/stdlib.hpp"
+#include "lib/string.hpp"
 #include "memory/paging.hpp"
-#include "memory/vmm.hpp"
 
 extern "C" void enter_usermode(uintptr_t entry, uintptr_t stack_top);
 
@@ -42,65 +41,99 @@ namespace userspace {
             __builtin_unreachable();
         }
 
-        uintptr_t get_module_address(const char* const module_name) {
-            const limine_module_response* module_response = limine_requests::module_request.response;
-            if (!module_response || module_response->module_count == 0) {
-                panic("No modules provided");
-            }
-
-            const limine_file* module = nullptr;
-
-            for (size_t i = 0; i < module_response->module_count; ++i) {
-                if (strcmp(module_response->modules[i]->path, module_name) == 0) {
-                    module = module_response->modules[i];
-                    break;
+        namespace {
+            void write_user_bytes(const uint64_t cr3, const uintptr_t virt, const void* data, const size_t len) {
+                const auto* src = static_cast<const uint8_t*>(data);
+                size_t written = 0;
+                while (written < len) {
+                    const uintptr_t addr = virt + written;
+                    uintptr_t phys;
+                    if (!paging::translate(cr3, addr, phys)) {
+                        panic("write_user_bytes: unmapped user address 0x%lx", addr);
+                    }
+                    const size_t page_off = addr & (paging::PAGE_SIZE - 1);
+                    size_t chunk = paging::PAGE_SIZE - page_off;
+                    if (chunk > len - written) chunk = len - written;
+                    memcpy(reinterpret_cast<void*>(phys + paging::g_hhdm_offset), src + written, chunk);
+                    written += chunk;
                 }
             }
 
-            if (!module) {
-                panic("Module not found");
-            }
+            uintptr_t build_initial_stack(const uint64_t cr3, const uintptr_t stack_top, const task* t,
+                                          const char* path) {
+                constexpr uint64_t AT_NULL = 0, AT_PHDR = 3, AT_PHENT = 4, AT_PHNUM = 5,
+                                   AT_PAGESZ = 6, AT_BASE = 7, AT_ENTRY = 9;
 
-            return reinterpret_cast<uintptr_t>(module->address);
+                uintptr_t sp = stack_top;
+
+                const size_t path_len = strlen(path) + 1;
+                sp -= path_len;
+                const uintptr_t argv0_addr = sp;
+                write_user_bytes(cr3, sp, path, path_len);
+
+                const struct {
+                    uint64_t type;
+                    uint64_t value;
+                } auxv[] = {
+                    {.type = AT_PHDR, .value = t->phdr_addr},
+                    {.type = AT_PHENT, .value = t->phentsize},
+                    {.type = AT_PHNUM, .value = t->phnum},
+                    {.type = AT_PAGESZ, .value = paging::PAGE_SIZE},
+                    {.type = AT_BASE, .value = 0},
+                    {.type = AT_ENTRY, .value = reinterpret_cast<uint64_t>(t->entry_point)},
+                    {.type = AT_NULL, .value = 0},
+                };
+
+                const uint64_t argv_ptrs[2] = {argv0_addr, 0};
+                constexpr uint64_t envp_ptrs[1] = {};
+                constexpr uint64_t argc = 1;
+
+                constexpr size_t total = sizeof(argc) + sizeof(argv_ptrs) + sizeof(envp_ptrs) + sizeof(auxv);
+                sp -= total;
+                sp &= ~static_cast<uintptr_t>(0xF); // SysV ABI: SP must be 16-byte aligned at entry
+
+                uintptr_t p = sp;
+                write_user_bytes(cr3, p, &argc, sizeof(argc));
+                p += sizeof(argc);
+                write_user_bytes(cr3, p, argv_ptrs, sizeof(argv_ptrs));
+                p += sizeof(argv_ptrs);
+                write_user_bytes(cr3, p, envp_ptrs, sizeof(envp_ptrs));
+                p += sizeof(envp_ptrs);
+                write_user_bytes(cr3, p, auxv, sizeof(auxv));
+
+                return sp;
+            }
         }
     }
 
+    [[noreturn]]
     void launch(const char* path, const char* const argv[], char* const envp[], const char* const env_vars[]) {
         (void)argv;
         (void)envp;
         (void)env_vars;
 
-        vfs::stat_t stat;
+        vfs::stat_t stat{};
         if (!vfs::stat(path, &stat)) {
             panic("Failed to stat %s", path);
         }
 
         const uint32_t max_buffer_size = stat.size;
-        const auto init_buffer = static_cast<uint8_t*>(malloc(max_buffer_size));
+        const auto program_buf = static_cast<uint8_t*>(malloc(max_buffer_size));
 
-        if (!init_buffer) {
+        if (!program_buf) {
             panic("Failed to allocate buffer");
         }
-        if (!vfs::read(path, init_buffer, max_buffer_size)) {
+
+        if (!vfs::read(path, program_buf, max_buffer_size)) {
             panic("Failed to read %s", path);
         }
 
-        // const auto snell_buffer = static_cast<uint8_t*>(malloc(max_buffer_size));
-        //
-        // if (!snell_buffer) {
-        //     panic("Failed to allocate buffer");
-        // }
-        // if (!vfs::read("/BOOT/SNELL", snell_buffer, max_buffer_size)) {
-        //     panic("Failed to read /BOOT/SNELL");
-        // }
+        task* t = create_task(reinterpret_cast<uintptr_t>(program_buf));
 
-        current = create_task(reinterpret_cast<uintptr_t>(init_buffer));
-        // task* next = create_task(reinterpret_cast<uintptr_t>(snell_buffer));
-
-        // current->next = next;
-        // next->next = current;
-
-        enter_task(current);
+        if (!current) {
+            current = t;
+        }
+        enter_task(t);
         __builtin_unreachable();
     }
 
@@ -112,10 +145,14 @@ namespace userspace {
 
     void enter_task(task* task) {
         current = task;
-        paging::switch_cr3(current->cr3);
-        tss::set_kernel_stack(reinterpret_cast<uintptr_t>(current->rsp0));
+        paging::switch_cr3(task->cr3);
+        tss::set_kernel_stack(reinterpret_cast<uintptr_t>(task->rsp0));
 
-        switch_to_userspace(reinterpret_cast<uintptr_t>(current->entry_point), current->stack_base + current->stack_size);
+        const uintptr_t initial_sp = build_initial_stack(task->cr3, task->stack_base + task->stack_size,
+                                                         task,
+                                                         "/BOOT/INIT");
+        switch_to_userspace(reinterpret_cast<uintptr_t>(task->entry_point), initial_sp);
+        // switch_to_userspace(reinterpret_cast<uintptr_t>(current->entry_point), current->stack_base + current->stack_size);
         __builtin_unreachable();
     }
 }

@@ -5,7 +5,7 @@
 constexpr uint32_t PIT_FREQUENCY = 1193182;
 
 namespace timer {
-    inline volatile uint64_t timer_ticks = 0;
+    inline uint64_t timer_ticks = 0;
 
     void init(uint32_t frequency);
 

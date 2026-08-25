@@ -1,8 +1,4 @@
 #include "driver/serial.hpp"
-
-#include <cstdarg>
-#include <lib/format.hpp>
-
 #include "kernel/system.hpp"
 
 namespace serial {
@@ -76,14 +72,11 @@ namespace serial {
         }
     }
 
-    void printf(const char* fmt, ...) {
-        va_list ap;
-        va_start(ap, fmt);
-        print(vformat(fmt, ap));
-        va_end(ap);
-    }
-
     bool available() {
         return s_available;
     }
+}
+
+extern "C" void serial_putchar(char c) {
+    serial::putchar(c);
 }

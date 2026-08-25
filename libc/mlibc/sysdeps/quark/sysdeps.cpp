@@ -1,9 +1,13 @@
+#include "include/mlibc/sysdeps.hpp"
+
 #include "mlibc/tcb.hpp"
 #include <abi-bits/errno.h>
 #include <bits/ensure.h>
 #include <bits/syscall.h>
 #include <mlibc/all-sysdeps.hpp>
 #include <string.h>
+
+#include "include/bits/syscall.h"
 
 // Must match the syscall numbers dispatched in kernel/src/kernel/syscall.cpp's handle_syscall().
 #define SYS_READ 0
@@ -18,6 +22,10 @@
 #define SYS_SLEEP 9
 #define SYS_EXIT 10
 #define SYS_SET_FS_BASE 11
+#define SYS_OPENDIR 12
+#define SYS_READDIR 13
+#define SYS_CLOSEDIR 14
+#define SYS_WAITPID 15
 
 #define STUB()                                                                                     \
 	({                                                                                             \
@@ -85,8 +93,8 @@ namespace mlibc {
         return syscall(SYS_GETPID);
     }
 
-    int Sysdeps<Close>::operator()(int) {
-        STUB();
+    int Sysdeps<Close>::operator()(int fd) {
+        return syscall(SYS_CLOSE, fd);
     }
 
     int Sysdeps<FutexWake>::operator()(int*, bool) {
@@ -97,20 +105,53 @@ namespace mlibc {
         STUB();
     }
 
-    int Sysdeps<Read>::operator()(int, void*, unsigned long, long*) {
-        STUB();
+    int Sysdeps<Read>::operator()(int fd, void* buf, unsigned long size, long* ret) {
+        *ret = syscall(SYS_READ, fd, buf, size);
+        return 0;
     }
 
     int Sysdeps<Open>::operator()(const char*, int, unsigned int, int*) {
         STUB();
     }
 
-    int Sysdeps<VmMap>::operator()(void*, size_t, int, int, int, off_t, void**) {
-        STUB();
+    int Sysdeps<OpenDir>::operator()(const char* path, int* handle) {
+        syscall(SYS_OPENDIR, path, handle);
+        return 0;
     }
 
-    int Sysdeps<VmUnmap>::operator()(void*, size_t) {
-        STUB();
+    // int Sysdeps<CloseDir>::operator()(const char*, int, unsigned int, int*) {
+    //     STUB();
+    // }
+
+    int Sysdeps<VmMap>::operator()(void* hint, size_t size, int prot, int flags, int fd, off_t offset, void** window) {
+        (void)offset; // kernel's sys_mmap doesn't support file offsets
+        auto out = syscall(SYS_MMAP, hint, size, prot, flags, fd);
+        if ((void*)out == MAP_FAILED) {
+            *window = nullptr;
+            return ENOMEM;
+        }
+        *window = (void*)out;
+        return 0;
+    }
+
+    int Sysdeps<VmUnmap>::operator()(void* hint, size_t size) {
+        auto out = syscall(SYS_MUNMAP, hint, size);
+        return 0;
+    }
+
+    int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
+        syscall(SYS_EXEC, path, argv, envp);
+        return 0;
+    }
+
+    int Sysdeps<Fork>::operator()(pid_t *child) {
+        syscall(SYS_FORK, child);
+        return 0;
+    }
+
+    int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, rusage *ru, pid_t *ret_pid) {
+        syscall(SYS_WAITPID, pid, status, flags, ru, ret_pid);
+        return 0;
     }
 
     int Sysdeps<ClockGet>::operator()(int, time_t*, long*) {

@@ -7,6 +7,8 @@ size_t strlen(const char* str);
 
 char* strcpy(char* destination, const char* source);
 
+char* strdup(const char* src);
+
 char* strcat(char* destination, const char* source);
 
 char* strncat(char* destination, const char* source, size_t count);

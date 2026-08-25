@@ -1,4 +1,7 @@
 #include "kernel/stdio.hpp"
+
+#include <kernel/scheduler.hpp>
+
 #include "driver/fb.hpp"
 #include "driver/ps2/keyboard.hpp"
 #include "lib/string.hpp"
@@ -104,16 +107,6 @@ size_t write_stdin(const uint8_t* data, const size_t count) {
 
 static uint32_t line = 0;
 
-void stdin_push(const uint8_t c) {
-    const size_t next = (stdin_head + 1) % STDIN_SIZE;
-    if (next == stdin_tail) {
-        return;
-    }
-
-    stdin_buffer[stdin_head] = c;
-    stdin_head = next;
-}
-
 void stdout_push(const uint8_t* c) {
     const size_t next = (stdout_head + 1) % STDIN_SIZE;
     if (next == stdout_tail) {
@@ -128,8 +121,10 @@ void stderr_push(const uint8_t c) {
 }
 
 size_t stdin_read(void* buf, const size_t size) {
-    if (buf == nullptr) {
-        return 0;
+    if (buf == nullptr) return 0;
+
+    while (stdin_tail == stdin_head) {
+        scheduler::block_current(&stdin_head);
     }
 
     auto* output = static_cast<uint8_t*>(buf);
@@ -138,8 +133,17 @@ size_t stdin_read(void* buf, const size_t size) {
         output[count++] = stdin_buffer[stdin_tail];
         stdin_tail = (stdin_tail + 1) % STDIN_SIZE;
     }
-
     return count;
+}
+
+void stdin_push(const uint8_t c) {
+    const size_t next = (stdin_head + 1) % STDIN_SIZE;
+    if (next == stdin_tail) return;
+
+    stdin_buffer[stdin_head] = c;
+    stdin_head = next;
+
+    scheduler::unblock(&stdin_head);
 }
 
 int stdout_read(void* buf, const size_t size) {

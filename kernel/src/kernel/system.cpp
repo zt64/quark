@@ -1,11 +1,6 @@
 #include "kernel/system.hpp"
-
-#include <cstdarg>
-#include <lib/format.hpp>
-
 #include "driver/fb.hpp"
 #include "kernel/log.hpp"
-#include "kernel/stdio.hpp"
 
 // read from b
 uint8_t inb(uint16_t port) {
@@ -31,11 +26,7 @@ void outl(uint16_t port, uint32_t data) {
 void panic(const char* msg, ...) {
     va_list ap;
     va_start(ap, msg);
-    const char* formatted = vformat(msg, ap);
+    logger.vlog(LOG_LEVEL_FATAL, msg, ap);
     va_end(ap);
-    logger.fatal(formatted);
-
-    // write_stdout(reinterpret_cast<const uint8_t*>(formatted), strlen(formatted));
-
     for (;;) asm volatile("hlt");
 }

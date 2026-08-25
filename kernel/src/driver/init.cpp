@@ -27,8 +27,8 @@ namespace drivers {
         logger.info("PS/2 keyboard initialized");
 
         logger.info("Starting PCI bus enumeration");
-        pci::enumerate_busses();
-        logger.info("PCI enumeration completed");
+        // pci::enumerate_busses();
+        // logger.info("PCI enumeration completed");
 
         vfs::init();
         logger.info("Virtual file system initialized");

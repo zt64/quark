@@ -18,8 +18,12 @@ namespace mlibc {
         FutexWait,
         Read,
         Open,
+        OpenDir,
         VmMap,
         VmUnmap,
+        Execve,
+        Fork,
+        Waitpid,
         ClockGet,
         GetPid {
     };

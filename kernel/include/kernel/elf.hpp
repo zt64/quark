@@ -8,6 +8,7 @@ namespace elf {
         uintptr_t phys_base;
         uint32_t page_count;
     };
+
     class ElfImage {
     public:
         void* entry_point;
@@ -15,6 +16,9 @@ namespace elf {
         uint32_t image_size;
         segment segments[16];
         uint32_t segment_count;
+        uintptr_t phdr_addr;
+        uint16_t phentsize;
+        uint16_t phnum;
     };
 
     ElfImage* load_file(uintptr_t cr3, uintptr_t addr);

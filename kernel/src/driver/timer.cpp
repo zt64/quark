@@ -1,11 +1,8 @@
 #include "driver/timer.hpp"
-
-#include <kernel/process.hpp>
-#include <kernel/scheduler.hpp>
-
-#include "driver/pic.hpp"
 #include "driver/fb.hpp"
+#include "driver/pic.hpp"
 #include "driver/sound.hpp"
+#include "kernel/scheduler.hpp"
 #include "kernel/system.hpp"
 
 constexpr uint8_t PIT_CHANNEL_0 = 0x40;

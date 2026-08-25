@@ -1,7 +1,9 @@
 #include "kernel/log.hpp"
+
+#include <lib/printf.h>
+
 #include "driver/fb.hpp"
 #include "driver/serial.hpp"
-#include "lib/format.hpp"
 #include "lib/mem.hpp"
 #include "lib/string.hpp"
 
@@ -158,43 +160,48 @@ void redraw() {
 void Logger::vlog(const LogLevel level, const char* fmt, va_list ap) const {
     if (level < log_level) return;
 
-    char* body = vformat(fmt, ap);
-    if (!body) return;
-
     const char* prefix;
+
     switch (level) {
-        case LOG_LEVEL_DEBUG: prefix = "\033[94m";
-            break; // bright blue
-        case LOG_LEVEL_INFO: prefix = "\033[92m";
-            break; // bright green
-        case LOG_LEVEL_WARN: prefix = "\033[93m";
-            break; // bright yellow
-        case LOG_LEVEL_ERROR: prefix = "\033[91m";
-            break; // bright red
-        case LOG_LEVEL_FATAL: prefix = "\033[95m";
-            break; // bright magenta
-        default: prefix = "";
-            break;
+        case LOG_LEVEL_DEBUG: prefix = "\033[94m"; break;
+        case LOG_LEVEL_INFO:  prefix = "\033[92m"; break;
+        case LOG_LEVEL_WARN:  prefix = "\033[93m"; break;
+        case LOG_LEVEL_ERROR: prefix = "\033[91m"; break;
+        case LOG_LEVEL_FATAL: prefix = "\033[95m"; break;
+        default:              prefix = ""; break;
     }
 
-    const char* formatted = format("%s[%s] %s\033[0m\n", prefix, level_names[level], body);
+    char body[255];
+    vsnprintf(body, sizeof(body), fmt, ap);
 
-    // free(body);
-    // free(const_cast<char*>(formatted));
+    char buffer[255];
+    snprintf(
+        buffer,
+        sizeof(buffer),
+        "%s[%s] %s\033[0m\n",
+        prefix,
+        level_names[level],
+        body
+    );
 
-    const size_t next = (log_buffer_head + 1) % LOG_MAX_LINES;
+    const uint32_t next = (log_buffer_head + 1) % LOG_MAX_LINES;
+
     if (next == log_buffer_tail) {
         return;
     }
 
-    log_buffer[next].len = strlen(formatted);
-    log_buffer[next].timestamp = 0;
-    log_buffer[next].level = level;
-    memcpy(log_buffer[next].payload, formatted, log_buffer[next].len);
+    LogEntry& entry = log_buffer[log_buffer_head];
+
+    entry.len = strlen(buffer);
+    entry.timestamp = 0;
+    entry.level = level;
+
+    memcpy(entry.payload, buffer, entry.len);
+
     log_buffer_head = next;
 
     if (serial::available()) {
-        serial::printf(log_buffer[next].payload, log_buffer[next].len);
+        printf(entry.payload);
     }
 
     redraw();

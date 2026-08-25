@@ -197,18 +197,14 @@ namespace elf {
                 memset(image_virt, 0, total_pages * paging::PAGE_SIZE);
 
                 for (uint64_t p = 0; p < total_pages; p++) {
-                    paging::map_page(
+                    if (!paging::map_page(
                         cr3,
                         img_min + p * paging::PAGE_SIZE,
                         reinterpret_cast<uintptr_t>(image_phys) + p * paging::PAGE_SIZE,
                         paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER
-                    );
-                }
-
-                for (uint32_t i = 0; i < hdr->phnum; i++) {
-                    const auto &phdr =
-                        reinterpret_cast<const ElfProgramHeader *>(
-                            reinterpret_cast<const uint8_t *>(hdr) + hdr->phoff)[i];
+                    )) {
+                        panic("load_file: failed to map page %lu of %lu at 0x%lx", p, total_pages, img_min + p * paging::PAGE_SIZE);
+                    }
                 }
 
                 for (uint32_t i = 0; i < hdr->phnum; i++) {
@@ -218,7 +214,6 @@ namespace elf {
                     if (phdr.p_type == LOAD) {
                         const auto src = reinterpret_cast<const uint8_t*>(hdr) + phdr.p_offset;
                         const auto dst = static_cast<uint8_t*>(image_virt) + (phdr.p_vaddr - img_min);
-
 
                         memcpy(dst, src, phdr.p_filesz);
                     }
@@ -233,7 +228,9 @@ namespace elf {
                 img->base_address = img_min;
                 img->image_size = static_cast<uint32_t>(img_max - img_min);
                 img->entry_point = reinterpret_cast<void*>(hdr->entry);
-
+                img->phdr_addr = img->base_address + hdr->phoff;
+                img->phentsize = hdr->phentsize;
+                img->phnum = hdr->phnum;
                 return img;
             }
             case ET_REL:

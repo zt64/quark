@@ -130,7 +130,8 @@ namespace userspace {
         task* t = create_task(reinterpret_cast<uintptr_t>(program_buf));
 
         t->next = t;
-        enter_task(t);
+        switch_to_task(t);
+        __builtin_unreachable();
     }
 
     [[noreturn]]

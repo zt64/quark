@@ -106,7 +106,6 @@ namespace userspace {
         }
     }
 
-    [[noreturn]]
     void launch(const char* path, const char* const argv[], char* const envp[], const char* const env_vars[]) {
         (void)argv;
         (void)envp;
@@ -130,17 +129,19 @@ namespace userspace {
 
         task* t = create_task(reinterpret_cast<uintptr_t>(program_buf));
 
-        if (!current) {
+        if (current == nullptr) {
             current = t;
+            enter_task(t);
         }
-        enter_task(t);
-        __builtin_unreachable();
+
+        switch_to_task(t);
     }
 
     [[noreturn]]
     void launch_init() {
         logger.info("Launching init");
         launch("/BOOT/INIT", nullptr, nullptr, nullptr);
+        __builtin_unreachable();
     }
 
     void enter_task(task* task) {

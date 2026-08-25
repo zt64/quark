@@ -171,8 +171,9 @@ static size_t sys_munmap(const void* addr, const size_t length, const int prot, 
     return 0;
 }
 
-[[noreturn]] static void sys_exec(const char* path, char* const argv[], char* const envp[]) {
+static size_t sys_exec(const char* path, char* const argv[], char* const envp[]) {
     userspace::launch(path, argv, envp, nullptr);
+    return 0;
 }
 
 // TODO: Kernel stack size should be defined in a constant somewhere
@@ -277,12 +278,11 @@ static uint64_t handle_munmap(const regs* r) {
 }
 
 static uint64_t handle_exec(const regs* r) {
-    sys_exec(
+    return sys_exec(
         reinterpret_cast<const char*>(r->rbx),
         reinterpret_cast<char* const*>(r->rcx),
         reinterpret_cast<char* const*>(r->rdx)
     );
-    __builtin_unreachable();
 }
 
 static uint64_t handle_fork(const regs*) {

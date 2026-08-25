@@ -106,7 +106,7 @@ namespace userspace {
         }
     }
 
-    void launch(const char* path, const char* const argv[], char* const envp[], const char* const env_vars[]) {
+    [[noreturn]] void launch(const char* path, const char* const argv[], char* const envp[], const char* const env_vars[]) {
         (void)argv;
         (void)envp;
         (void)env_vars;
@@ -129,12 +129,8 @@ namespace userspace {
 
         task* t = create_task(reinterpret_cast<uintptr_t>(program_buf));
 
-        if (current == nullptr) {
-            current = t;
-            enter_task(t);
-        }
-
-        switch_to_task(t);
+        t->next = t;
+        enter_task(t);
     }
 
     [[noreturn]]

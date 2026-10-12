@@ -65,10 +65,10 @@ fi
 
 QEMU_ARGS=(
     -cdrom "$BUILD_DIR/quark.iso"
+#    -drive id=disk0,if=none,file="$BUILD_DIR/quark.img",format=raw,cache=writeback
 
     -machine q35,pcspk-audiodev=speaker
     -cpu max
-    -smp 4
     -m "$MEMORY"
 
     -rtc base=utc,clock=host
@@ -79,8 +79,11 @@ QEMU_ARGS=(
     -boot menu=on,splash-time=0
 
     -audiodev pa,id=speaker
+    -nic model=rtl8139
 
-#    -device isa-debug-exit,iobase=0xf4,iosize=4
+    -device piix3-ide,id=ide       # adds a PCI IDE controller (class 01/01) to the q35 PCI bus
+#    -device ide-hd,bus=ide.0,unit=0,drive=disk0   # attach the disk to that controller's primary channel
+    -device isa-debug-exit,iobase=0xf4,iosize=4
 
     -no-reboot
     -no-shutdown

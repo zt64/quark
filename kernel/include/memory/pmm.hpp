@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-namespace mem {
+namespace pmm {
     // Initialize the physical memory manager
     void init_pmm();
 

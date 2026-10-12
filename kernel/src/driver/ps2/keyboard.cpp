@@ -1,32 +1,39 @@
 #include <cstddef>
 #include "driver/ps2/keyboard.hpp"
 #include "kernel/system.hpp"
+#include "driver/irq.hpp"
 #include "driver/pic.hpp"
 #include "driver/ps2/ps2.hpp"
 
-#define KB_BUFFER_SIZE  64
+namespace ps2::keyboard {
+    constexpr uint16_t KB_BUFFER_SIZE = 256;
+    constexpr uint8_t KEYBOARD_IRQ = 1;
+    constexpr uint8_t EXTENDED_KEY = 0xE0;
 
-static key_listener_t g_listener = nullptr;
+    constexpr uint8_t CMD_SET_LEDS = 0xED;
+    constexpr uint8_t CMD_GET_SET_SCANCODE_SET = 0xF0;
+    constexpr uint8_t CMD_SET_RATE = 0xF3;
 
-static volatile uint8_t kb_buf[KB_BUFFER_SIZE];
-static volatile uint8_t kb_buf_head = 0;
-static volatile uint8_t kb_buf_tail = 0;
+    static key_listener_t g_listener = nullptr;
 
-static void kb_enqueue(const uint8_t scancode) {
-    if (const size_t next = (kb_buf_head + 1) % sizeof(kb_buf); next != kb_buf_tail) {
-        kb_buf[next] = scancode;
-        kb_buf_head = next;
+    static volatile uint8_t kb_buf[KB_BUFFER_SIZE];
+    static volatile uint8_t kb_buf_head = 0;
+    static volatile uint8_t kb_buf_tail = 0;
+
+    static void kb_enqueue(const uint8_t scancode) {
+        if (const size_t next = (kb_buf_head + 1) % sizeof(kb_buf); next != kb_buf_tail) {
+            kb_buf[next] = scancode;
+            kb_buf_head = next;
+        }
     }
-}
 
-static bool kb_dequeue(uint8_t* out) {
-    if (kb_buf_tail == kb_buf_head) return false;
-    *out = kb_buf[kb_buf_tail];
-    kb_buf_tail = (kb_buf_tail + 1) % sizeof(kb_buf);
-    return true;
-}
+    static bool kb_dequeue(uint8_t* out) {
+        if (kb_buf_tail == kb_buf_head) return false;
+        *out = kb_buf[kb_buf_tail];
+        kb_buf_tail = (kb_buf_tail + 1) % sizeof(kb_buf);
+        return true;
+    }
 
-namespace keyboard {
     static void kb_handler(const regs* _) {
         const unsigned char scancode = inb(PS2_DATA_PORT);
 
@@ -34,10 +41,16 @@ namespace keyboard {
         process_queue();
     }
 
-    void init() {
-        pic::unmask_irq(1); // unmask keyboard IRQ (IRQ1)
+    static void send_cmd(const uint8_t cmd) {
+        outb(PS2_COMMAND_PORT, cmd);
+    }
 
-        irq::install_handler(1, kb_handler);
+    void init() {
+        pic::unmask_irq(KEYBOARD_IRQ); // unmask keyboard IRQ (IRQ1)
+
+        // send_cmd(CMD_GET_SET_SCANCODE_SET);
+
+        irq::install_handler(KEYBOARD_IRQ, kb_handler);
     }
 
     void register_listener(const key_listener_t listener) {
@@ -52,7 +65,7 @@ namespace keyboard {
     void process_queue() {
         uint8_t sc;
         while (kb_dequeue(&sc)) {
-            if (sc == 0xE0) {
+            if (sc == EXTENDED_KEY) {
                 ext_key = true;
                 continue;
             }

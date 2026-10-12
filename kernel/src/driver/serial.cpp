@@ -1,4 +1,5 @@
 #include "driver/serial.hpp"
+#include <cstddef>
 #include "kernel/system.hpp"
 
 namespace serial {
@@ -17,6 +18,8 @@ namespace serial {
 
     constexpr uint8_t LSR_DATA_READY = 0x01;
     constexpr uint8_t LSR_TRANSMITTER_EMPTY = 0x20;
+
+    constexpr uint16_t CHAR_TIMEOUT = 10000;
 
     int init() {
         outb(PORT + 1, IER_DISABLE_ALL); // Disable all interrupts
@@ -58,10 +61,11 @@ namespace serial {
 
     void putchar(const char c) {
         if (!s_available) return;
-        int timeout = 10000;
+        uint16_t timeout = 10000;
         while (timeout-- > 0 && !transmitted()) {
-            asm volatile ("pause");
+            asm volatile("pause");
         }
+
         outb(PORT, c);
     }
 
@@ -69,6 +73,13 @@ namespace serial {
         if (!str) return;
         while (*str) {
             putchar(*str++);
+        }
+    }
+
+    void print(const char* str, const size_t len) {
+        if (!str) return;
+        for (size_t i = 0; i < len; ++i) {
+            putchar(str[i]);
         }
     }
 

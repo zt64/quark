@@ -119,11 +119,7 @@ add_subdirectory(libc)
 add_subdirectory(kernel)
 add_subdirectory(user/init)
 add_subdirectory(user/snell)
-
-find_program(XORRISO NAMES xorriso REQUIRED)
-find_program(DD_TOOL NAMES dd REQUIRED)
-find_program(MFORMAT_TOOL NAMES mformat REQUIRED)
-find_program(MCOPY_TOOL NAMES mcopy REQUIRED)
+add_subdirectory(user/coreutil)
 
 include(FetchContent)
 
@@ -142,71 +138,37 @@ add_custom_command(
 )
 add_custom_target(limine_tool ALL DEPENDS ${limine_SOURCE_DIR}/limine)
 
-set(LIMINE_DEPLOY ${limine_SOURCE_DIR}/limine)
-
 set(ISO_DIR ${CMAKE_BINARY_DIR}/iso)
 set(ISO_OUTPUT ${CMAKE_BINARY_DIR}/quark.iso)
-
 set(LIMINE_SRC_DIR ${limine_SOURCE_DIR})
-set(LIMINE_DIR ${ISO_DIR}/boot/limine)
-set(EFI_DIR ${ISO_DIR}/EFI/BOOT)
-
 set(QUARK_IMG ${CMAKE_BINARY_DIR}/quark.img)
 
 # Disk image
 add_custom_command(
         OUTPUT ${QUARK_IMG}
-        COMMAND ${DD_TOOL} if=/dev/zero of=${QUARK_IMG} bs=1M count=64 status=none
-        COMMAND ${MFORMAT_TOOL} -i ${QUARK_IMG} -F ::
+        COMMAND ${CMAKE_SOURCE_DIR}/scripts/build-img.sh --img ${QUARK_IMG}
         COMMENT "Creating FAT32 disk image"
         VERBATIM
 )
-
 add_custom_target(quark_img DEPENDS ${QUARK_IMG})
 
 # Install into sysroot
 add_custom_target(quark_sysroot_install
         COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG>
-        DEPENDS ${KERNEL_TARGET} init snell quark_libc
+        DEPENDS ${KERNEL_TARGET} init snell quark_libc coreutils
         COMMENT "Installing kernel + userspace into sysroot"
         VERBATIM
 )
 
 # ISO
 add_custom_target(quark_iso
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${ISO_DIR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${LIMINE_DIR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${ISO_DIR}/boot
-
-        # Kernel + userspace
-        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_SYSROOT}/boot/quark ${ISO_DIR}/boot/quark
-        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_SYSROOT}/boot/init ${ISO_DIR}/boot/init.elf
-        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_SYSROOT}/boot/snell ${ISO_DIR}/boot/snell.elf
-
-        # FAT32 disk image
-        COMMAND ${MCOPY_TOOL} -i ${QUARK_IMG} -o -s ${QUARK_SYSROOT}/boot ::/
-        COMMAND ${CMAKE_COMMAND} -E copy ${QUARK_IMG} ${ISO_DIR}/quark.img
-
-        # Limine config + boot files
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/limine.conf ${LIMINE_DIR}/limine.conf
-        COMMAND ${CMAKE_COMMAND} -E copy ${LIMINE_SRC_DIR}/limine-bios.sys ${LIMINE_DIR}/limine-bios.sys
-        COMMAND ${CMAKE_COMMAND} -E copy ${LIMINE_SRC_DIR}/limine-bios-cd.bin ${LIMINE_DIR}/limine-bios-cd.bin
-        COMMAND ${CMAKE_COMMAND} -E copy ${LIMINE_SRC_DIR}/limine-uefi-cd.bin ${LIMINE_DIR}/limine-uefi-cd.bin
-
-        # UEFI boot files
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${ISO_DIR}/EFI/BOOT
-        COMMAND ${CMAKE_COMMAND} -E copy ${LIMINE_SRC_DIR}/BOOTX64.EFI ${ISO_DIR}/EFI/BOOT
-        COMMAND ${CMAKE_COMMAND} -E copy ${LIMINE_SRC_DIR}/BOOTIA32.EFI ${ISO_DIR}/EFI/BOOT
-
-        # Build hybrid BIOS/UEFI ISO
-        COMMAND ${XORRISO} -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin
-        -no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus
-        -apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin
-        -efi-boot-part --efi-boot-image --protective-msdos-label
-        ${ISO_DIR} -o ${ISO_OUTPUT}
-
-        # Install BIOS stage 1/2 into the ISO
-        COMMAND ${LIMINE_DEPLOY} bios-install ${ISO_OUTPUT}
+        COMMAND ${CMAKE_SOURCE_DIR}/scripts/build-iso.sh
+        --iso-dir ${ISO_DIR}
+        --sysroot ${QUARK_SYSROOT}
+        --img ${QUARK_IMG}
+        --limine-src ${LIMINE_SRC_DIR}
+        --out ${ISO_OUTPUT}
+        --limine-conf ${CMAKE_SOURCE_DIR}/limine.conf
         DEPENDS quark init snell ${CMAKE_SOURCE_DIR}/limine.conf limine_tool
         COMMENT "Creating bootable ISO"
         VERBATIM

@@ -9,8 +9,6 @@ enum LogLevel {
     LOG_LEVEL_FATAL
 };
 
-void redraw();
-
 class Logger {
 public:
     explicit Logger(const LogLevel initial = LOG_LEVEL_DEBUG) : log_level(initial) {

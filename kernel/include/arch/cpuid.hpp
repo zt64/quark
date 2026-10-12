@@ -1,4 +1,4 @@
-#pragma once
+    #pragma once
 
 enum {
     CPUID_FEAT_ECX_SSE3         = 1 << 0,

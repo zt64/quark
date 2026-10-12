@@ -1,17 +1,15 @@
-#include "kernel/tss.hpp"
+#include "arch/x86_64/tss.hpp"
 #include <cstdint>
-#include "kernel/gdt.hpp"
+#include "arch/x86_64/gdt.hpp"
 #include "lib/mem.hpp"
 
-namespace {
-    alignas(16) uint8_t kernel_stack[16 * 1024];
-}
-
-extern "C" void tss_load();
-
-extern "C" tss_entry_t tss_entry = {};
-
 namespace tss {
+    namespace {
+        alignas(16) uint8_t kernel_stack[16 * 1024];
+    }
+
+    extern "C" tss_entry_t tss_entry = {};
+
     void init() {
         memset(&tss_entry, 0, sizeof(tss_entry));
 
@@ -23,7 +21,11 @@ namespace tss {
             sizeof(tss_entry) - 1
         );
 
-        tss_load();
+        asm volatile(
+            "movw $0x28, %%ax\n"
+            "ltr %%ax\n"
+            : : : "ax"
+        );
     }
 
     void set_kernel_stack(const uintptr_t rsp0) {

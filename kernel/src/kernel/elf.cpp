@@ -152,9 +152,19 @@ namespace elf {
         return true;
     }
 
-#define ELF_RELOC_ERR (-1)
+    constexpr uint8_t ELF_RELOC_ERR = (-1);
 
     ElfImage* load_file(const uintptr_t cr3, const uintptr_t addr) {
+        if (!cr3) {
+            logger.error("ELF File cr3 is null.\n");
+            return nullptr;
+        }
+
+        if (!addr) {
+            logger.error("ELF File address is null.\n");
+            return nullptr;
+        }
+
         const auto* hdr = reinterpret_cast<const ElfHeader*>(addr);
         if (!elf_check_supported(hdr)) {
             logger.error("ELF File cannot be loaded.\n");
@@ -179,14 +189,14 @@ namespace elf {
                     }
 
                     if (phdr.p_type == LOAD) {
-                        img_min = min(img_min, phdr.p_vaddr & ~(paging::PAGE_SIZE - 1));
-                        img_max = max(
+                        img_min = math::min(img_min, phdr.p_vaddr & ~(paging::PAGE_SIZE - 1));
+                        img_max = math::max(
                             img_max, (phdr.p_vaddr + phdr.p_memsz + paging::PAGE_SIZE - 1) & ~(paging::PAGE_SIZE - 1));
                     }
                 }
 
                 const uint64_t total_pages = (img_max - img_min + paging::PAGE_SIZE - 1) / paging::PAGE_SIZE;
-                const void* image_phys = mem::allocate_physical_pages(total_pages);
+                const void* image_phys = pmm::allocate_physical_pages(total_pages);
                 if (!image_phys) {
                     panic("Unable to allocate physical pages for ELF image");
                 }
@@ -203,10 +213,11 @@ namespace elf {
                         reinterpret_cast<uintptr_t>(image_phys) + p * paging::PAGE_SIZE,
                         paging::PAGE_PRESENT | paging::PAGE_WRITABLE | paging::PAGE_USER
                     )) {
-                        panic("load_file: failed to map page %lu of %lu at 0x%lx", p, total_pages, img_min + p * paging::PAGE_SIZE);
+                        panic("load_file: failed to map page %lu of %lu at 0x%lx", p, total_pages,
+                              img_min + p * paging::PAGE_SIZE);
                     }
                 }
-
+                vmm::track(cr3, img_min, total_pages * paging::PAGE_SIZE, VM_FLAG_WRITE | VM_FLAG_USER);
                 for (uint32_t i = 0; i < hdr->phnum; i++) {
                     const auto phdr = reinterpret_cast<const ElfProgramHeader*>(
                         reinterpret_cast<const uint8_t*>(hdr) + hdr->phoff)[i];
@@ -250,7 +261,7 @@ namespace elf {
             for (uint32_t p = 0; p < page_count; ++p) {
                 paging::unmap_page(virt_base + p * paging::PAGE_SIZE);
             }
-            mem::free_physical_pages(reinterpret_cast<void*>(phys_base), page_count);
+            pmm::free_physical_pages(reinterpret_cast<void*>(phys_base), page_count);
         }
 
         delete image;

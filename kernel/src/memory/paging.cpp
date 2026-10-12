@@ -4,6 +4,7 @@
 #include "kernel/system.hpp"
 #include "kernel/log.hpp"
 #include "memory/pmm.hpp"
+#include "lib/mem.hpp"
 
 namespace paging {
     namespace {
@@ -42,6 +43,11 @@ namespace paging {
             return reinterpret_cast<uint64_t*>(physical + g_hhdm_offset);
         }
 
+        /**
+         * Check if the entry is present
+         * @param entry The entry to check
+         * @return True if the entry is present, false otherwise
+         */
         bool is_present(const uint64_t entry) {
             return (entry & PAGE_PRESENT) != 0;
         }
@@ -55,9 +61,16 @@ namespace paging {
         uint64_t* get_or_create_next_table(uint64_t& entry, const uint64_t flags) {
             if (!is_present(entry)) {
                 // Create a new table
-                const auto phys = reinterpret_cast<uintptr_t>(mem::allocate_physical_page());
+                const auto phys = reinterpret_cast<uintptr_t>(pmm::allocate_physical_page());
 
                 if (phys == 0) return nullptr;
+
+                // The physical allocator does not zero pages, so a freshly
+                // allocated page table would otherwise contain stale/garbage
+                // entries. Those garbage bits can randomly look "present" to
+                // is_present(), causing map_page() to think a brand new
+                // virtual address is already mapped and silently fail.
+                memset(physical_to_virtual(phys), 0, PAGE_SIZE);
 
                 entry = phys | PAGE_PRESENT | PAGE_WRITABLE | (flags & PAGE_USER);
             }
@@ -76,6 +89,10 @@ namespace paging {
     uint64_t g_kernel_virt_base = 0;
     uint64_t g_kernel_size = 0;
     uint64_t g_hhdm_offset = 0;
+
+    /**
+     * Kernel CR3 value
+     */
     uint64_t g_cr3_value = 0;
 
     extern "C" uint64_t kernel_start[];
@@ -115,7 +132,7 @@ namespace paging {
     }
 
     constexpr uint32_t address_spaces_max = 1024;
-    uint64_t address_spaces[address_spaces_max];
+    static uint64_t address_spaces[address_spaces_max];
 
     uint64_t new_address_space() {
         if (!is_initialized()) {
@@ -123,26 +140,47 @@ namespace paging {
             return 0;
         }
 
-        const auto phys = reinterpret_cast<uintptr_t>(mem::allocate_physical_page());
-        const auto virt = physical_to_virtual(phys);
+        const auto phys =
+            reinterpret_cast<uintptr_t>(pmm::allocate_physical_page());
 
-        // map kernel pml4 to higher half of task local pml4 256-512
-        for (uint64_t i = 256; i < 512; i++) {
+        if (phys == 0) {
+            logger.error("new_address_space: failed to allocate PML4");
+            return 0;
+        }
+
+        auto* virt = reinterpret_cast<uint64_t*>(physical_to_virtual(phys));
+
+        // Start with an empty address space.
+        memset(virt, 0, paging::PAGE_SIZE);
+
+        // Share the kernel half of the address space.
+        for (uint64_t i = 256; i < 512; ++i) {
             virt[i] = pml4_table[i];
         }
 
-        for (uint64_t & address_space : address_spaces) {
+        // Find a bookkeeping slot.
+        for (uint64_t& address_space : address_spaces) {
             if (address_space == 0) {
                 address_space = phys;
-                break;
+                return phys;
             }
         }
 
-        return phys;
+        logger.error("new_address_space: address-space table exhausted");
+
+        pmm::free_physical_page(reinterpret_cast<void*>(phys));
+
+        return 0;
     }
 
     size_t free_address_space(const uint64_t cr3) {
-        mem::free_physical_page(reinterpret_cast<void*>(cr3));
+        for (uint64_t& address_space : address_spaces) {
+            if (address_space == cr3) {
+                address_space = 0;
+                break;
+            }
+        }
+        pmm::free_physical_page(reinterpret_cast<void*>(cr3));
         return 0;
     }
 
@@ -262,7 +300,6 @@ namespace paging {
         asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
         return true;
     }
-
 
     bool map_page(const uintptr_t virt, const uintptr_t phys, const uint64_t flags) {
         if (!is_initialized()

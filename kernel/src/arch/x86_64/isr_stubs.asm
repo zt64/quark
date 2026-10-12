@@ -17,9 +17,9 @@ isr_stub_%+%1:
 %endmacro
 
 extern current
-extern isr_dispatch      ; was: extern fault_handler
+extern isr_dispatch
 %define TASK_ESP 8
-%define TASK_TRAP_FRAME 48
+%define TASK_TRAP_FRAME 72
 
 isr_common_stub:
     cli
@@ -50,7 +50,8 @@ isr_common_stub:
 .dispatch:
     mov rdi, rsp
     call isr_dispatch
-
+global isr_return          ; <-- add this label + global export
+isr_return:
     pop r15
     pop r14
     pop r13

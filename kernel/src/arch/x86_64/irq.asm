@@ -20,6 +20,8 @@ irq_stub_table:
 %endrep
 
 extern irq_handle
+extern current
+%define TASK_TRAP_FRAME 72
 ; https://github.com/i3vie/neutrino/blob/master/src/arch/x86_64/isr_stubs.S
 irq_common_stub:
     cli
@@ -39,6 +41,14 @@ irq_common_stub:
     push r14
     push r15
 
+    ; Keep current->trap_frame in sync here too -- isr_common_stub does
+    ; this for syscalls/exceptions, but hardware IRQs used to skip it,
+    ; leaving a stale pointer if a task got preempted mid-syscall-return.
+    mov rax, [rel current]
+    test rax, rax
+    jz .irq_dispatch
+    mov [rax + TASK_TRAP_FRAME], rsp
+.irq_dispatch:
     mov rdi, rsp ; the stack coincidentally is shaped like a C struct so we can just throw that into C
     call irq_handle
 

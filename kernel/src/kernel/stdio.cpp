@@ -1,26 +1,21 @@
 #include "kernel/stdio.hpp"
-
-#include <kernel/scheduler.hpp>
-
-#include "driver/fb.hpp"
+#include <kernel/process/scheduler.hpp>
 #include "driver/ps2/keyboard.hpp"
 #include "lib/string.hpp"
 
-constexpr uint32_t STDIN_SIZE = 1024;
-constexpr uint32_t STDOUT_SIZE = 1024;
-constexpr uint32_t STDERR_SIZE = 1024;
-
-static uint8_t stdin_buffer[STDIN_SIZE];
-static uint8_t stdout_buffer[STDOUT_SIZE];
-static uint8_t stderr_buffer[STDERR_SIZE];
-static size_t stdin_head = 0;
-static size_t stdin_tail = 0;
-static size_t stdout_head = 0;
-static size_t stdout_tail = 0;
-static bool shift_down = false;
-
 namespace {
-    char translate_key(const KeyEvent event) {
+    constexpr uint32_t STDIN_SIZE = 1024;
+    constexpr uint32_t STDOUT_SIZE = 1024;
+
+    uint8_t stdin_buffer[STDIN_SIZE];
+    uint8_t stdout_buffer[STDOUT_SIZE];
+    size_t stdin_head = 0;
+    size_t stdin_tail = 0;
+    size_t stdout_head = 0;
+    size_t stdout_tail = 0;
+    bool shift_down = false;
+
+    char translate_key(const ps2::keyboard::KeyEvent event) {
         if (event.extended_key || event.break_key) {
             return '\0';
         }
@@ -81,7 +76,7 @@ namespace {
         }
     }
 
-    void handle_keyboard_event(const KeyEvent event) {
+    void handle_keyboard_event(const ps2::keyboard::KeyEvent event) {
         if (event.scancode == 0x12 || event.scancode == 0x59) {
             shift_down = !event.break_key;
             return;
@@ -105,8 +100,6 @@ size_t write_stdin(const uint8_t* data, const size_t count) {
     return count;
 }
 
-static uint32_t line = 0;
-
 void stdout_push(const uint8_t* c) {
     const size_t next = (stdout_head + 1) % STDIN_SIZE;
     if (next == stdout_tail) {
@@ -115,9 +108,6 @@ void stdout_push(const uint8_t* c) {
 
     stdout_buffer[stdout_head] = *c;
     stdout_head = next;
-}
-
-void stderr_push(const uint8_t c) {
 }
 
 size_t stdin_read(void* buf, const size_t size) {
@@ -146,22 +136,6 @@ void stdin_push(const uint8_t c) {
     scheduler::unblock(&stdin_head);
 }
 
-int stdout_read(void* buf, const size_t size) {
-    if (size > STDOUT_SIZE) {
-        return -1;
-    }
-
-    return 0;
-}
-
-int stderr_read(void* buf, const size_t size) {
-    if (size > STDERR_SIZE) {
-        return -1;
-    }
-
-    return 0;
-}
-
 void init_stdio() {
-    keyboard::register_listener(handle_keyboard_event);
+    ps2::keyboard::register_listener(handle_keyboard_event);
 }

@@ -1,19 +1,11 @@
 BITS 64
 
-extern current
-extern tss_entry
-
-%define TASK_RSP   8
-%define TASK_RSP0  16
-%define TASK_CR3   24
-%define TASK_FS_BASE 32
-
-%define TSS_RSP0   4
-
-%define IA32_FS_BASE    0xC0000100
-
-global switch_to_task
-switch_to_task:
+; rdi = prev_rsp_slot (void**, may be null to skip saving the old rsp)
+; rsi = next_rsp      (value to load into rsp)
+; rdx = next_cr3      (value to load into cr3, if different from current)
+global raw_switch_to_task
+raw_switch_to_task:
+    push rax
     push rbx
     push rbp
     push r12
@@ -21,40 +13,23 @@ switch_to_task:
     push r14
     push r15
 
-    mov rax, [rel current]
-    test rax, rax
+    test rdi, rdi
     jz .load_next
-
-    mov [rax + TASK_RSP], rsp
-
+    mov [rdi], rsp
 .load_next:
-    mov [rel current], rdi
-
-    mov rsp, [rdi + TASK_RSP]
+    mov rsp, rsi
 
     mov rax, cr3
-    mov rcx, [rdi + TASK_CR3]
-
-    cmp rax, rcx
+    cmp rax, rdx
     je .same_cr3
 
-    mov cr3, rcx
-
+    mov cr3, rdx
 .same_cr3:
-    mov rax, [rdi + TASK_RSP0]
-    mov [rel tss_entry + TSS_RSP0], rax
-
-    ; Restore the incoming task's %fs base (TLS thread pointer) via IA32_FS_BASE MSR.
-    mov ecx, IA32_FS_BASE
-    mov eax, [rdi + TASK_FS_BASE]
-    mov edx, [rdi + TASK_FS_BASE + 4]
-    wrmsr
-
     pop r15
     pop r14
     pop r13
     pop r12
     pop rbp
     pop rbx
-
+    pop rax
     ret

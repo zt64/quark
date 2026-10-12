@@ -11,11 +11,15 @@ namespace timer {
 
     void set_pit(uint32_t frequency);
 
-    void wait(uint32_t ticks);
+    void sleep(uint32_t ticks);
 
-    void wait_ms(uint32_t ms);
+    void sleep_ms(uint32_t ms);
+
+    void sleep_micro(uint32_t micro);
 
     inline uint64_t get_ticks() { return timer_ticks; }
+
+    uint64_t ns_since_boot();
 
     inline void wait_for_tick(uint64_t previous) {
         // Wait for an interrupt-driven tick, but bound the number of HLT
@@ -24,7 +28,7 @@ namespace timer {
         // the function returns and the caller can decide how to proceed.
         constexpr uint32_t max_hlts = 200000;
         uint32_t count = 0;
-        while (static_cast<uint64_t>(timer_ticks) == previous) {
+        while (timer_ticks == previous) {
             asm volatile("hlt");
             if (++count >= max_hlts) {
                 // fallback: small busy loop to yield a bit and return

@@ -1,85 +1,19 @@
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <font8x8.hpp>
-#include <string>
 #include <dirent.h>
+#include <string>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include "unistd.h"
-#include "sys/mman.h"
 
-constexpr uint32_t width = 1280;
-constexpr uint32_t height = 720;
-constexpr uint32_t pitch = 5120;
-constexpr uint32_t bpp = 32;
-constexpr uint32_t screen_size = (width * height * bpp) / 8;
-
-uint8_t* fbp;
-uint8_t screen_buffer[screen_size];
-
-static void put_pixel(const uint32_t x, const uint32_t y, const uint32_t color) {
-    const uint64_t offset = static_cast<uint64_t>(pitch) * y + static_cast<uint64_t>(x) * (bpp / 8);
-    if (offset + sizeof(uint32_t) > screen_size) return;
-    auto* location = reinterpret_cast<uint32_t*>(screen_buffer + offset);
-    *location = color;
-}
-
-static void draw_char(const unsigned char c, const uint32_t x, const uint32_t y, const float size) {
-    const unsigned char* glyph = font8x8_basic[c];
-    for (uint32_t cy = 0; cy < 8; cy++) {
-        for (uint32_t cx = 0; cx < 8; cx++) {
-            const uint8_t mask[8] = {1, 2, 4, 8, 16, 32, 64, 128};
-            if (!(glyph[cy] & mask[cx])) continue;
-            const uint32_t x0 = x + static_cast<uint32_t>(cx * size);
-            const uint32_t y0 = y + static_cast<uint32_t>(cy * size);
-            const uint32_t x1 = x + static_cast<uint32_t>((cx + 1) * size);
-            const uint32_t y1 = y + static_cast<uint32_t>((cy + 1) * size);
-            for (uint32_t py = y0; py < y1; ++py) {
-                for (uint32_t px = x0; px < x1; ++px) {
-                    put_pixel(px, py, 0xFFFFFF);
-                }
-            }
-        }
-    }
-}
-
-constexpr size_t CONTENT_MAX = 8192;
-char content[CONTENT_MAX] = {};
-uint32_t content_len = 0;
-constexpr uint8_t SCALE = 2;
-constexpr uint8_t CHAR_SIZE = 8 * SCALE;
-
-static void redraw() {
-    memset(screen_buffer, 0, screen_size);
-
-    uint32_t x = 0, y = 0;
-
-    for (uint32_t i = 0; i < content_len; i++) {
-        const char c = content[i];
-        if (c == '\r') continue;
-        if (c == '\n') {
-            x = 0;
-            y += CHAR_SIZE;
-            continue;
-        }
-        draw_char(static_cast<unsigned char>(c), x, y, SCALE);
-        x += CHAR_SIZE;
-        if (x >= width) {
-            x = 0;
-            y += CHAR_SIZE;
-        }
-    }
-
-    memcpy(fbp, screen_buffer, screen_size);
-}
+static char* cwd = nullptr;
+static char* prompt;
 
 static void append_output(const char* text, const size_t len) {
-    for (size_t i = 0; i < len && content_len < CONTENT_MAX; i++) {
-        content[content_len++] = text[i];
-    }
-
-    redraw();
+    printf("%.*s", static_cast<int>(len), text);
+    fflush(stdout);
 }
 
 static void append_output(const char* text) {
@@ -91,61 +25,58 @@ static void append_char(const char c) {
 }
 
 static void backspace() {
-    if (content_len > 0) {
-        content_len--;
-        redraw();
-    }
+    printf("\b \b");
+    fflush(stdout);
 }
 
 constexpr uint16_t TOKEN_BUF_SIZE = 64;
 constexpr auto TOKEN_DELIM = " \t\r\n\a";
 
-void parse_line(char* line) {
+static void parse_line(char* line) {
     if (strcmp(line, "") == 0) return;
     uint16_t buffer_size = TOKEN_BUF_SIZE, pos = 0;
-    auto tokens = static_cast<char**>(malloc(buffer_size * sizeof(char*)));
+    auto argv = static_cast<char**>(malloc(buffer_size * sizeof(char*)));
 
-    if (!tokens) {
-        // TODO: log error
+    if (!argv) {
         exit(EXIT_FAILURE);
     }
 
     char* token = strtok(line, TOKEN_DELIM);
 
     while (token != nullptr) {
-        tokens[pos] = token;
+        argv[pos] = token;
         pos++;
 
         if (pos >= buffer_size) {
             buffer_size += TOKEN_BUF_SIZE;
 
-            auto new_tokens = static_cast<char**>(realloc(tokens, buffer_size * sizeof(char*)));
+            printf("reallocing\n");
+            const auto new_tokens = static_cast<char**>(realloc(argv, buffer_size * sizeof(char*)));
 
             if (!new_tokens) {
                 exit(EXIT_FAILURE);
             }
 
-            tokens = new_tokens;
-
+            argv = new_tokens;
         }
 
         token = strtok(nullptr, TOKEN_DELIM);
     }
 
-    tokens[pos] = nullptr;
+    argv[pos] = nullptr;
 
-    const uint32_t arg_count = pos - 1;
+    const uint32_t argc = pos;
 
     {
-        const char* command = tokens[0];
+        const char* command = argv[0];
         if (strcmp(command, "echo") == 0) {
             uint32_t arg_pos = 0;
             uint32_t echo_buffer_size = 64;
             auto echo_buffer = static_cast<char*>(malloc(echo_buffer_size * sizeof(char)));
             memset(echo_buffer, 0, echo_buffer_size);
 
-            while (tokens[arg_pos + 1] != nullptr) {
-                const char* str = tokens[arg_pos + 1];
+            while (argv[arg_pos + 1] != nullptr) {
+                const char* str = argv[arg_pos + 1];
 
                 if (strlen(str) > echo_buffer_size) {
                     echo_buffer_size += 64;
@@ -167,44 +98,125 @@ void parse_line(char* line) {
             strcat(echo_buffer, "\n");
             append_output(echo_buffer, strlen(echo_buffer));
         } else if (strcmp(command, "ls") == 0) {
-            std::string path;
+            const char* path = argv[1] ? argv[1] : cwd;
 
-            if (tokens[1] == nullptr) {
-                path = "/";
-            } else {
-                path = tokens[1];
+            DIR* dir = opendir(path);
+
+            if (!dir) {
+                append_output("ls: failed to open directory\n");
+                return;
             }
 
-            DIR *dir = opendir(path.c_str());
-
-            const dirent* ent = readdir(dir);
-
-            while (ent != nullptr) {
+            while (const dirent* ent = readdir(dir)) {
                 append_output(ent->d_name);
+                append_char(' ');
             }
+
+            append_char('\n');
 
             closedir(dir);
         } else if (strcmp(command, "cd") == 0) {
-            char* path = tokens[0];
-
-            if (arg_count > 2) {
-                append_output("Too many arguments for cd");
+            if (argc > 2) {
+                append_output("Too many arguments for cd\n");
+                return;
             }
 
-            // TODO: Check if path exists, update PWD
-        } else if (strcmp(command, "pwd") == 0) {
+            const char* path;
 
+            if (argc == 1) {
+                path = getenv("HOME");
+
+                if (!path) {
+                    append_output("cd: HOME not set\n");
+                    return;
+                }
+            } else {
+                path = argv[1];
+            }
+
+            if (chdir(path) == -1) {
+                append_output("cd: No such file or directory\n");
+                return;
+            }
+
+            if (!getcwd(cwd, 4096)) {
+                append_output("cd: failed to get current directory\n");
+                return;
+            }
+
+            prompt = static_cast<char*>(
+                realloc(prompt, strlen(cwd) + 3)
+            );
+
+            if (!prompt) {
+                append_output("cd: failed to allocate prompt\n");
+                return;
+            }
+
+            snprintf(prompt, strlen(cwd) + 3, "%s> ", cwd);
+        } else if (strcmp(command, "pwd") == 0) {
+            append_output(cwd);
         } else if (strcmp(command, "exit") == 0) {
             exit(EXIT_SUCCESS);
+        } else if (strcmp(command, "clear") == 0) {
+            // Clear the screen
+            append_output("\033[H\033[J");
         } else {
-            const char* path = getenv("PATH");
+            char path[] = "/bin:/usr/bin";
+            constexpr auto delim = ":";
+            char* token = strtok(path, delim);
+            char* executable_path = nullptr;
 
-            append_output("command not found\n");
+            while (token != nullptr) {
+                const size_t path_len = strlen(token) + strlen(command) + 2;
+
+                auto* full_path = static_cast<char*>(malloc(path_len));
+
+                if (!full_path) {
+                    exit(EXIT_FAILURE);
+                }
+
+                snprintf(full_path, path_len, "%s/%s", token, command);
+
+                struct stat buf;
+
+                if (stat(full_path, &buf) == 0) {
+                    executable_path = full_path;
+                    break;
+                }
+
+                free(full_path);
+                token = strtok(nullptr, delim);
+            }
+
+            if (executable_path) {
+                const pid_t pid = fork();
+
+                if (pid < 0) {
+                    free(executable_path);
+                    append_output("fork failed\n");
+                    return;
+                }
+
+                if (pid == 0) {
+                    execve(executable_path, argv, nullptr);
+
+                    append_output("execve failed\n");
+                    _exit(127);
+                }
+
+                int status;
+                waitpid(pid, &status, 0);
+
+                printf("Status: %d\n", WEXITSTATUS(status));
+
+                free(executable_path);
+            }
         }
     }
-}
 
-constexpr char PROMPT[] = "> ";
+    free(argv);
+}
 
 static char* readline() {
     static char linebuf[512];
@@ -241,20 +253,24 @@ static char* readline() {
 }
 
 int main() {
-    // TODO: implement a proper way of exposing the framebuffer to userspace
-    // Likely some fbdev driver that a user program requests access to by providing parameters
-    fbp = static_cast<uint8_t*>(
-        mmap(nullptr, screen_size, PROT_READ | PROT_WRITE, MAP_ANON, 3, 0)
-    );
-    memset(fbp, 0, screen_size);
+    {
+        char cwd_buf[256];
+        cwd = getcwd(cwd_buf, sizeof(cwd_buf));
+        if (strcmp(cwd_buf, "") == 0) {
+            cwd = strdup("/");
+        }
 
-    append_output(PROMPT);
+        prompt = static_cast<char*>(malloc(strlen(cwd) + 4));
+        snprintf(prompt, strlen(cwd) + 4, "%s> ", cwd);
+    }
+
+    append_output(prompt);
 
     while (true) {
         char* line = readline();
         parse_line(line);
         free(line);
-        append_output(PROMPT);
+        append_output(prompt);
     }
 
     return 0;

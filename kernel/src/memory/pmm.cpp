@@ -1,14 +1,12 @@
 #include "memory/pmm.hpp"
-
 #include <cstddef>
-
-#include "lib/mem.hpp"
 #include "boot/limine/limine_requests.hpp"
 #include "kernel/log.hpp"
 #include "kernel/system.hpp"
+#include "lib/mem.hpp"
 #include "memory/paging.hpp" // for g_kernel_phys_base / g_kernel_size / g_hhdm_offset
 
-namespace mem {
+namespace pmm {
     constexpr size_t PAGE_SIZE = 4096;
 
     // Bitmap-based physical memory manager

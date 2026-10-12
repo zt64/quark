@@ -1,8 +1,7 @@
 #include "memory/vmm.hpp"
-
-#include "lib/mem.hpp"
 #include <kernel/log.hpp>
-#include "lib/stdlib.hpp"
+#include "memory/heap.hpp"
+#include "lib/mem.hpp"
 #include "memory/paging.hpp"
 #include "memory/pmm.hpp"
 
@@ -15,33 +14,24 @@ namespace vmm {
             vm_object* next;
         } vm_object;
 
-        // Per-address-space bookkeeping: each cr3 gets its own independent
-        // vm_object list, so allocations for one task don't affect where
-        // another task's allocations land. Previously this was a single
-        // global list shared by every task, which meant a freshly created
-        // task's stack could land at a different virtual address than an
-        // earlier task's -- breaking fork(), where parent and child must
-        // agree on virtual addresses since only the physical backing differs.
         constexpr size_t MAX_ADDRESS_SPACES = 64;
-
         struct address_space_entry {
             uint64_t cr3;
             vm_object* objs;
         };
-
-        static address_space_entry g_spaces[MAX_ADDRESS_SPACES] = {};
+        address_space_entry g_spaces[MAX_ADDRESS_SPACES] = {};
 
         vm_object** objs_for(const uint64_t cr3) {
-            for (auto& entry : g_spaces) {
-                if (entry.cr3 == cr3) {
-                    return &entry.objs;
+            for (auto& [entry_cr3, objs] : g_spaces) {
+                if (entry_cr3 == cr3) {
+                    return &objs;
                 }
             }
-            for (auto& entry : g_spaces) {
-                if (entry.cr3 == 0) {
-                    entry.cr3 = cr3;
-                    entry.objs = nullptr;
-                    return &entry.objs;
+            for (auto& [entry_cr3, objs] : g_spaces) {
+                if (entry_cr3 == 0) {
+                    entry_cr3 = cr3;
+                    objs = nullptr;
+                    return &objs;
                 }
             }
             logger.error("vmm: address space table exhausted");
@@ -51,12 +41,9 @@ namespace vmm {
 
     static uint64_t convert_x86_64_vm_flags(const size_t flags) {
         uint64_t value = 0;
-        if (flags & VM_FLAG_WRITE)
-            value |= paging::PAGE_WRITABLE;
-        if (flags & VM_FLAG_USER)
-            value |= paging::PAGE_USER;
-        if ((flags & VM_FLAG_EXEC) == 0)
-            value |= paging::PAGE_EXEC;
+        if (flags & VM_FLAG_WRITE) value |= paging::PAGE_WRITABLE;
+        if (flags & VM_FLAG_USER) value |= paging::PAGE_USER;
+        if ((flags & VM_FLAG_EXEC) == 0) value |= paging::PAGE_EXEC;
         return value;
     };
 
@@ -88,12 +75,14 @@ namespace vmm {
         return found;
     }
 
-    uintptr_t vmm_alloc(const uint64_t cr3, size_t length, const size_t flags, const void* arg) {
-        (void)arg;
+    uintptr_t alloc(const uint64_t cr3, size_t length, const size_t flags) {
         length = ((length + paging::PAGE_SIZE - 1) / paging::PAGE_SIZE) * paging::PAGE_SIZE;
 
         vm_object** list = objs_for(cr3);
-        if (list == nullptr) return 0;
+        if (list == nullptr) {
+            logger.error("vmm_alloc: failed to get vm_object list for cr3=0x%lx", cr3);
+            return 0;
+        }
 
         constexpr uintptr_t min_base = 0x10000000;
         vm_object* current = *list;
@@ -116,7 +105,7 @@ namespace vmm {
             found = min_base;
         }
 
-        auto* latest = static_cast<vm_object*>(malloc(sizeof(vm_object)));
+        auto* latest = static_cast<vm_object*>(kalloc(sizeof(vm_object)));
         if (latest == nullptr) {
             return 0;
         }
@@ -125,9 +114,9 @@ namespace vmm {
         latest->length = length;
         latest->flags = flags;
 
-        const auto phys_base = reinterpret_cast<uintptr_t>(mem::allocate_physical_pages(length / paging::PAGE_SIZE));
+        const auto phys_base = reinterpret_cast<uintptr_t>(pmm::allocate_physical_pages(length / paging::PAGE_SIZE));
         if (phys_base == 0) {
-            free(latest);
+            kfree(latest);
             return 0;
         }
 
@@ -137,8 +126,8 @@ namespace vmm {
                 for (size_t rollback = 0; rollback < offset; rollback += paging::PAGE_SIZE) {
                     paging::unmap_page(cr3, latest->base + rollback);
                 }
-                mem::free_physical_pages(reinterpret_cast<void*>(phys_base), offset / paging::PAGE_SIZE);
-                free(latest);
+                pmm::free_physical_pages(reinterpret_cast<void*>(phys_base), offset / paging::PAGE_SIZE);
+                kfree(latest);
                 return 0;
             }
         }
@@ -164,7 +153,7 @@ namespace vmm {
             current_obj = current_obj->next;
         }
 
-        auto* latest = static_cast<vm_object*>(malloc(sizeof(vm_object)));
+        auto* latest = static_cast<vm_object*>(kalloc(sizeof(vm_object)));
         if (latest == nullptr) {
             logger.error("vmm::track: failed to allocate vm_object for 0x%lx", base);
             return;
@@ -217,7 +206,7 @@ namespace vmm {
             }
         }
 
-        mem::free_physical_pages(reinterpret_cast<void*>(phys_base), page_count);
+        pmm::free_physical_pages(reinterpret_cast<void*>(phys_base), page_count);
 
         if (prev == nullptr) {
             *list = vmob->next;
@@ -225,6 +214,37 @@ namespace vmm {
             prev->next = vmob->next;
         }
 
-        free(vmob);
+        kfree(vmob);
+    }
+
+    void clone_address_space(const uint64_t dst_cr3, const uint64_t src_cr3) {
+        vm_object** src_list = objs_for(src_cr3);
+        if (src_list == nullptr) return;
+
+        for (const vm_object* obj = *src_list; obj != nullptr; obj = obj->next) {
+            const size_t page_count = obj->length / paging::PAGE_SIZE;
+            const auto phys_base = reinterpret_cast<uintptr_t>(pmm::allocate_physical_pages(page_count));
+            if (phys_base == 0) {
+                logger.error("clone_address_space: failed to allocate pages for 0x%lx", obj->base);
+                continue;
+            }
+
+            const uint64_t page_flags = convert_x86_64_vm_flags(obj->flags);
+            for (size_t offset = 0; offset < obj->length; offset += paging::PAGE_SIZE) {
+                uintptr_t src_phys;
+                if (!paging::translate(src_cr3, obj->base + offset, src_phys)) {
+                    logger.error("clone_address_space: failed to translate src 0x%lx", obj->base + offset);
+                    continue;
+                }
+                memcpy(
+                    reinterpret_cast<void*>(phys_base + offset + paging::g_hhdm_offset),
+                    reinterpret_cast<const void*>(src_phys + paging::g_hhdm_offset),
+                    paging::PAGE_SIZE
+                );
+                paging::map_page(dst_cr3, obj->base + offset, phys_base + offset, page_flags);
+            }
+
+            track(dst_cr3, obj->base, obj->length, obj->flags);
+        }
     }
 }

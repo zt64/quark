@@ -1,12 +1,9 @@
 #include "kernel/platform.hpp"
-
-#include <arch/msr.hpp>
-
+#include "arch/x86_64/gdt.hpp"
+#include "arch/x86_64/idt.hpp"
+#include "arch/x86_64/tss.hpp"
 #include "driver/pic.hpp"
-#include "kernel/gdt.hpp"
-#include "kernel/idt.hpp"
 #include "kernel/log.hpp"
-#include "kernel/tss.hpp"
 
 namespace platform {
     void init_fpu() {
@@ -46,6 +43,9 @@ namespace platform {
 
     void enable_interrupts() {
         asm volatile("sti");
-        logger.info("Interrupts enabled");
+    }
+
+    void disable_interrupts() {
+        asm volatile("cli");
     }
 }

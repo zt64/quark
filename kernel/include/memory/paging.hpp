@@ -23,6 +23,10 @@ namespace paging {
     // Adopt Limine's active page tables. This does not modify CR3 or any mapping.
     void init();
 
+    /**
+     * Switch the current address space by changing the CR3 register.
+     * @param cr3
+     */
     void switch_cr3(uint64_t cr3);
 
     /**
@@ -31,6 +35,11 @@ namespace paging {
      */
     uint64_t new_address_space();
 
+    /**
+     * Free an address space by freeing its physical page
+     * @param cr3 The CR3 value of the address space to free
+     * @return
+     */
     size_t free_address_space(uint64_t cr3);
 
     bool is_initialized();
@@ -56,6 +65,12 @@ namespace paging {
     // TODO: Figure out huge pages 2MiB and 1 GiB
     bool map_page(uintptr_t virt, uintptr_t phys, uint64_t flags);
 
+    /**
+     * Unmap a page from the provided cr3
+     * @param cr3 The root pml4 table
+     * @param virt The virtual address of the page to unmap
+     * @return true if the page was successfully unmapped, false otherwise
+     */
     bool unmap_page(uintptr_t cr3, uintptr_t virt);
     bool unmap_page(uintptr_t virt);
 }

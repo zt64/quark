@@ -5,4 +5,4 @@ struct Config {
     LogLevel log_level;
 };
 
-void parse_cmdline(char* cmdline);
+void parse_cmdline(const char* cmdline);

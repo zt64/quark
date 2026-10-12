@@ -8,7 +8,7 @@ namespace memory {
         paging::init();
         logger.info("Paging initialized");
 
-        mem::init_pmm();
+        pmm::init_pmm();
         logger.info("Physical memory manager initialized");
     }
 }

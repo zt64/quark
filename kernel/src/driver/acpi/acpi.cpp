@@ -1,7 +1,8 @@
+#include "driver/acpi/acpi.hpp"
+#include <uacpi/acpi.h>
 #include <uacpi/uacpi.h>
-
-#include "driver/acpi.hpp"
 #include "kernel/log.hpp"
+#include "lib/string.hpp"
 
 namespace acpi {
     int init() {
@@ -13,5 +14,19 @@ namespace acpi {
         }
 
         return 0;
+    }
+
+    uacpi_table* find_table(const char* signature) {
+        for (size_t i = 0; i < sizeof(tables) / sizeof(tables[0]); ++i) {
+            if (tables[i].ptr == nullptr) {
+                continue;
+            }
+
+            if (strncmp(signature, tables[i].hdr->signature, 4) == 0) {
+                return &tables[i];
+            }
+        }
+
+        return nullptr;
     }
 }

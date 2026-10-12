@@ -2,14 +2,34 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/wait.h>
+#include "service.hpp"
 
-int main() {
-    execv("/BOOT/SNELL", nullptr);
+static Service* services[256];
 
-    // Init cannot die, or else the kernel dies
+int main(int argc, char* argv[]) {
+    printf("init start\n");
+
+    // TODO: Iterate through services and start
+
+    const pid_t pid = fork();
+
+    setenv("PATH", "/bin:/usr/bin", 1);
+
+    if (pid < 0) {
+        printf("init: fork failed\n");
+        for (;;) {}
+    }
+
+    if (pid == 0) {
+        // Child: replace itself with snell.
+        execv("/bin/snell", nullptr);
+        // Only reached if execv failed
+        printf("init: execv failed\n");
+        exit(1);
+    }
+
     for (;;) {
-
+        // Init cannot die, or else the kernel dies
     }
 
     return 0;

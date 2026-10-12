@@ -1,28 +1,28 @@
 #include <cstddef>
-#include "lib/stdlib.hpp"
+#include "memory/heap.hpp"
 
 void* operator new(const size_t size) {
-    return malloc(size);
+    return kalloc(size);
 }
 
 void* operator new[](const size_t size) {
-    return malloc(size);
+    return kalloc(size);
 }
 
 void operator delete(void* p) {
-    free(p);
+    kfree(p);
 }
 
 void operator delete[](void* p) {
-    free(p);
+    kfree(p);
 }
 
 void operator delete(void* p, const size_t size) {
     (void)size;
-    free(p);
+    kfree(p);
 }
 
 void operator delete[](void* p, const size_t size) {
     (void)size;
-    free(p);
+    kfree(p);
 }

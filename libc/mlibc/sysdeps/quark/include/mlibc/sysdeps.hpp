@@ -2,6 +2,8 @@
 
 #include <mlibc/sysdep-signatures.hpp>
 
+#include "../../../../options/internal/include/mlibc/sysdep-tags.hpp"
+
 namespace mlibc {
     struct QuarkSysdepTags :
         LibcPanic,
@@ -17,15 +19,26 @@ namespace mlibc {
         FutexWake,
         FutexWait,
         Read,
+        ReadEntries,
         Open,
         OpenDir,
         VmMap,
         VmUnmap,
+        VmProtect,
         Execve,
         Fork,
         Waitpid,
+        Kill,
         ClockGet,
-        GetPid {
+        ClockGetres,
+        ClockSet,
+        GetPid,
+        GetTid,
+        Stat,
+        GetCwd,
+        Chdir,
+        Mkdir,
+        Sleep {
     };
 
     template <typename Tag>

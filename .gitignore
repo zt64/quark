@@ -7,4 +7,6 @@
 OVMF_CODE.fd
 build/
 cmake-build-debug/
+user/rusty/.cargo/config.toml
+user/rusty/target/
 
